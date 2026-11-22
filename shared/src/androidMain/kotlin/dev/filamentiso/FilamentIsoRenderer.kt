@@ -7,6 +7,7 @@ import android.view.Surface
 import android.view.SurfaceView
 import com.google.android.filament.Box
 import com.google.android.filament.Camera
+import com.google.android.filament.Colors
 import com.google.android.filament.Engine
 import com.google.android.filament.Entity
 import com.google.android.filament.EntityManager
@@ -24,20 +25,26 @@ import com.google.android.filament.gltfio.FilamentAsset
 import com.google.android.filament.gltfio.Gltfio
 import com.google.android.filament.gltfio.ResourceLoader
 import com.google.android.filament.gltfio.UbershaderProvider
+import dev.filamentiso.scene.ModelSource
+import dev.filamentiso.scene.SceneContent
+import dev.filamentiso.scene.SceneModel
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.sin
 
 /**
- * Owns every Filament object for one [SurfaceView]. Create on the main thread, call
- * [resume]/[pause] with the lifecycle and [destroy] exactly once.
+ * Owns every Filament object for one [SurfaceView] and keeps the Filament scene in sync
+ * with a [SceneContent] (a list of glTF models) by diffing on each [setContent].
+ *
+ * Create on the main thread, call [resume]/[pause] with the lifecycle and [destroy] once.
  */
 class FilamentIsoRenderer(
     private val context: Context,
     private val surfaceView: SurfaceView,
-    assetPath: String,
     initialConfig: IsoSceneConfig,
 ) : Choreographer.FrameCallback {
 
@@ -61,7 +68,11 @@ class FilamentIsoRenderer(
     private val materialProvider = UbershaderProvider(engine)
     private val assetLoader = AssetLoader(engine, materialProvider, EntityManager.get())
     private val resourceLoader = ResourceLoader(engine)
-    private var asset: FilamentAsset? = null
+
+    private class Loaded(val model: SceneModel, val asset: FilamentAsset, val hidden: Set<Int>)
+    private val loaded = LinkedHashMap<String, Loaded>()
+    private val assetFileCache = HashMap<String, ByteArray>()
+    private var content = SceneContent(emptyList())
 
     private val uiHelper = UiHelper(UiHelper.ContextErrorPolicy.DONT_CHECK)
     private val displayHelper = DisplayHelper(context)
@@ -69,7 +80,7 @@ class FilamentIsoRenderer(
     private val choreographer = Choreographer.getInstance()
 
     private var config = initialConfig
-    private var bounds = Bounds(Vec3(0f, 0f, 0f), Vec3(1f, 1f, 1f))
+    private var bounds = Bounds(Vec3(0f, 1f, 0f), Vec3(3f, 1f, 3f))
     private var viewportW = 1
     private var viewportH = 1
     private var running = false
@@ -79,17 +90,12 @@ class FilamentIsoRenderer(
         view.scene = scene
         view.camera = camera
         applyBackground()
-
-        loadAsset(assetPath)
         applyLighting()
-
         uiHelper.renderCallback = SurfaceCallback()
         uiHelper.attachTo(surfaceView)
     }
 
     // ---------------------------------------------------------------- public API
-
-    val currentConfig: IsoSceneConfig get() = config
 
     fun setConfig(newConfig: IsoSceneConfig) {
         if (destroyed || newConfig == config) return
@@ -100,6 +106,37 @@ class FilamentIsoRenderer(
             old.ambientIntensity != newConfig.ambientIntensity
         ) applyLighting()
         updateCamera()
+    }
+
+    /** Diffs [newContent] against what is loaded: removes, (re)loads and updates models. */
+    fun setContent(newContent: SceneContent) {
+        if (destroyed || newContent == content) return
+        content = newContent
+        var geometryChanged = false
+
+        val keys = newContent.models.mapTo(HashSet()) { it.key }
+        loaded.keys.filter { it !in keys }.forEach { key ->
+            destroyLoaded(loaded.remove(key)!!)
+            geometryChanged = true
+        }
+        for (m in newContent.models) {
+            val cur = loaded[m.key]
+            if (cur == null || needsReload(cur.model, m)) {
+                cur?.let { destroyLoaded(it); loaded.remove(m.key) }
+                load(m)?.let { loaded[m.key] = it }
+                geometryChanged = true
+            } else if (cur.model != m) {
+                applyInstanceState(cur.asset, m)
+                loaded[m.key] = Loaded(m, cur.asset, cur.hidden)
+                if (cur.model.position != m.position || cur.model.rotationYDegrees != m.rotationYDegrees) geometryChanged = true
+            }
+        }
+
+        val newBounds = newContent.fitBounds ?: if (geometryChanged) computeVisibleBounds() else bounds
+        if (newBounds != bounds) {
+            bounds = newBounds
+            updateCamera()
+        }
     }
 
     fun resume() {
@@ -122,11 +159,8 @@ class FilamentIsoRenderer(
         // Detaching triggers onDetachedFromSurface → swap chain destroyed.
         uiHelper.detach()
 
-        asset?.let { a ->
-            scene.removeEntities(a.entities)
-            assetLoader.destroyAsset(a)
-        }
-        asset = null
+        loaded.values.forEach { destroyLoaded(it) }
+        loaded.clear()
         assetLoader.destroy()
         materialProvider.destroyMaterials()
         materialProvider.destroy()
@@ -159,61 +193,99 @@ class FilamentIsoRenderer(
         }
     }
 
-    // ---------------------------------------------------------------- scene setup
+    // ---------------------------------------------------------------- models
 
-    private fun loadAsset(path: String) {
-        val buffer = context.assets.open(path).use { input ->
-            val bytes = input.readBytes()
-            ByteBuffer.allocateDirect(bytes.size).order(ByteOrder.nativeOrder()).put(bytes).flip() as ByteBuffer
+    /** A full reload is needed when what the asset *is* changes, or when a color override must be undone. */
+    private fun needsReload(old: SceneModel, new: SceneModel): Boolean =
+        old.source != new.source ||
+            old.hiddenNodes != new.hiddenNodes ||
+            old.matteMaterials != new.matteMaterials ||
+            old.castShadows != new.castShadows ||
+            old.recolor != new.recolor ||
+            (old.tint != null && new.tint == null)
+
+    private fun bytesOf(source: ModelSource): ByteArray? = when (source) {
+        is ModelSource.Bytes -> source.bytes
+        is ModelSource.Asset -> assetFileCache.getOrPut(source.path) {
+            try {
+                context.assets.open(source.path).use { it.readBytes() }
+            } catch (e: Exception) {
+                Log.e(TAG, "Missing asset ${source.path}", e); return null
+            }
         }
-        val a = assetLoader.createAsset(buffer) ?: error("gltfio could not parse $path")
+    }
+
+    private fun load(m: SceneModel): Loaded? {
+        val bytes = bytesOf(m.source) ?: return null
+        val buffer = ByteBuffer.allocateDirect(bytes.size).order(ByteOrder.nativeOrder()).put(bytes)
+        buffer.flip()
+        val a = assetLoader.createAsset(buffer) ?: run {
+            Log.e(TAG, "gltfio could not parse ${m.source}"); return null
+        }
         resourceLoader.loadResources(a)
         a.releaseSourceData()
-        asset = a
 
         val rm = engine.renderableManager
         val hidden = HashSet<Int>()
         for (e in a.entities) {
             val name = a.getName(e)
-            if (name != null && name in config.hiddenNodes) {
-                hidden += e
-                continue
-            }
+            if (name != null && name in m.hiddenNodes) { hidden += e; continue }
             val ri = rm.getInstance(e)
             if (ri != 0) {
-                rm.setCastShadows(ri, true)
+                rm.setCastShadows(ri, m.castShadows)
                 rm.setReceiveShadows(ri, true)
             }
         }
         scene.addEntities(a.entities.filter { it !in hidden }.toIntArray())
-        Log.i(TAG, "Loaded $path: ${a.entities.size} entities, hid ${hidden.size} ${config.hiddenNodes}")
 
-        // Materials that exported with no PBR block default to metallic = 1 (dark under
-        // ambient-only light). Make them matte dielectrics instead.
-        var overridden = 0
         for (mi in a.instance.materialInstances) {
-            if (mi.name in config.matteMaterials) {
+            if (mi.name in m.matteMaterials) {
                 mi.setParameter("metallicFactor", 0f)
                 mi.setParameter("roughnessFactor", 0.8f)
-                overridden++
             }
+            m.recolor[mi.name]?.let { c -> mi.setParameter("baseColorFactor", Colors.RgbaType.SRGB, c.r, c.g, c.b, 1f) }
         }
-        Log.i(TAG, "Material overrides applied to $overridden instances")
-
-        bounds = computeVisibleBounds(a, hidden)
-        Log.i(TAG, "Visible bounds: $bounds")
+        applyInstanceState(a, m)
+        if (m.hiddenNodes.isNotEmpty()) Log.i(TAG, "Loaded ${m.key}: hid ${hidden.size} of ${a.entities.size} entities")
+        return Loaded(m, a, hidden)
     }
 
-    /** World-space AABB of all visible renderables (the asset box would include hidden ones). */
-    private fun computeVisibleBounds(a: FilamentAsset, hidden: Set<Int>): Bounds {
+    /** Transform + tint: cheap per-frame-safe updates that don't need a reload. */
+    private fun applyInstanceState(a: FilamentAsset, m: SceneModel) {
+        val tm = engine.transformManager
+        val r = Math.toRadians(m.rotationYDegrees.toDouble())
+        val c = cos(r).toFloat(); val s = sin(r).toFloat()
+        val p = m.position
+        // Column-major: rotation about Y, then translation.
+        val mat = floatArrayOf(
+            c, 0f, -s, 0f,
+            0f, 1f, 0f, 0f,
+            s, 0f, c, 0f,
+            p.x, p.y, p.z, 1f,
+        )
+        tm.setTransform(tm.getInstance(a.root), mat)
+        m.tint?.let { t ->
+            for (mi in a.instance.materialInstances) {
+                mi.setParameter("baseColorFactor", Colors.RgbaType.SRGB, t.r, t.g, t.b, 1f)
+            }
+        }
+    }
+
+    private fun destroyLoaded(l: Loaded) {
+        scene.removeEntities(l.asset.entities)
+        assetLoader.destroyAsset(l.asset)
+    }
+
+    /** World-space AABB of all visible renderables. */
+    private fun computeVisibleBounds(): Bounds {
         val rm = engine.renderableManager
         val tm = engine.transformManager
         val mn = floatArrayOf(Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE)
         val mx = floatArrayOf(-Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE)
         val box = Box()
         val m = FloatArray(16)
-        for (e in a.entities) {
-            if (e in hidden) continue
+        for (l in loaded.values) for (e in l.asset.entities) {
+            if (e in l.hidden) continue
             val ri = rm.getInstance(e)
             if (ri == 0) continue
             rm.getAxisAlignedBoundingBox(ri, box)
@@ -231,15 +303,16 @@ class FilamentIsoRenderer(
                 }
             }
         }
-        if (mn[0] > mx[0]) return a.boundingBox.let { Bounds(it.center.toVec3(), it.halfExtent.toVec3()) }
+        if (mn[0] > mx[0]) return bounds
         return Bounds(
             Vec3((mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2),
             Vec3((mx[0] - mn[0]) / 2, (mx[1] - mn[1]) / 2, (mx[2] - mn[2]) / 2),
         )
     }
 
+    // ---------------------------------------------------------------- lights, camera
+
     private fun applyLighting() {
-        // Sun: (re)build the light component on the same entity.
         engine.destroyEntity(sunEntity)
         val d = config.sunDirection.normalized()
         LightManager.Builder(LightManager.Type.SUN)
@@ -281,7 +354,6 @@ class FilamentIsoRenderer(
         )
     }
 
-    private fun FloatArray.toVec3() = Vec3(this[0], this[1], this[2])
     private fun srgbToLinear(c: Float) = if (c <= 0.04045f) c / 12.92f else ((c + 0.055f) / 1.055f).pow(2.4f)
 
     // ---------------------------------------------------------------- surface

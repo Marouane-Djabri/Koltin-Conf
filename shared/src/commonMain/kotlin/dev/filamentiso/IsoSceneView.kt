@@ -2,18 +2,24 @@ package dev.filamentiso
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import dev.filamentiso.scene.SceneContent
+import dev.filamentiso.scene.SceneGesture
 
 /**
- * The KMP seam: a platform-specific view that renders [assetPath] (a .glb) with [config].
+ * The KMP seam: a platform view that renders [content] (glTF models) with [config]'s
+ * camera and lighting, and reports raw touch input through [onGesture].
  *
  * Android: Filament + gltfio (androidMain). Desktop / iOS / web would add their own `actual`.
- * Gestures (drag = yaw, pinch = zoom) are reported through [onConfigChange] so the state
- * stays in common code.
+ * All interpretation of input (rotate, place furniture, draw rooms…) happens in common code.
  */
 @Composable
 expect fun IsoSceneView(
-    assetPath: String,
+    content: SceneContent,
     config: IsoSceneConfig,
-    onConfigChange: (IsoSceneConfig) -> Unit,
+    onGesture: (SceneGesture) -> Unit,
     modifier: Modifier = Modifier,
 )
+
+/** System back button (Android) — no-op on platforms without one. */
+@Composable
+expect fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit)

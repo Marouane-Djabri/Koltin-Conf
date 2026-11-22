@@ -1,7 +1,16 @@
 package dev.filamentiso
 
+import kotlinx.serialization.Serializable
+import kotlin.math.pow
+
 /** sRGB color with components in 0..1. Renderers convert to linear as needed. */
-data class Rgb(val r: Float, val g: Float, val b: Float)
+@Serializable
+data class Rgb(val r: Float, val g: Float, val b: Float) {
+    fun toLinear() = floatArrayOf(lin(r), lin(g), lin(b))
+    fun scaled(k: Float) = Rgb((r * k).coerceIn(0f, 1f), (g * k).coerceIn(0f, 1f), (b * k).coerceIn(0f, 1f))
+
+    private fun lin(c: Float) = if (c <= 0.04045f) c / 12.92f else ((c + 0.055f) / 1.055f).pow(2.4f)
+}
 
 /**
  * Everything a renderer needs to know about the iso scene. Pure data, no engine types.
@@ -13,6 +22,8 @@ data class IsoSceneConfig(
     val pitchDegrees: Float = ISO_PITCH_DEGREES,
     /** 1 = model fits the viewport (with [fitMargin]); 2 = twice as large on screen. */
     val zoom: Float = 1f,
+    /** World-space offset added to the camera target (two-finger pan). */
+    val pan: Vec3 = Vec3(0f, 0f, 0f),
     val fitMargin: Float = 0.06f,
     val backgroundColor: Rgb = Rgb(0.11f, 0.12f, 0.15f),
     /** Direction the sunlight travels (from the sun toward the scene), world space, Y up. */

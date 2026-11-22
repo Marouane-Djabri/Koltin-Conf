@@ -5,11 +5,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import dev.filamentiso.App
+import dev.filamentiso.FileHouseStore
+import dev.filamentiso.loadAssetCatalog
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        setContent { App(assetPath = "isoroom.glb") }
+        val store = FileHouseStore(this)
+        val extraCatalog = loadAssetCatalog(this)
+        setContent { App(store = store, extraCatalog = extraCatalog) }
     }
 }

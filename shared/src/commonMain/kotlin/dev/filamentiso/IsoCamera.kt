@@ -77,11 +77,12 @@ object IsoCamera {
         val radius = max(h.length, 1e-3f)
         val distance = radius * 3f
         val dir = viewDirection(config.yawDegrees, config.pitchDegrees)
-        val eye = bounds.center + dir * distance
+        val target = bounds.center + config.pan
+        val eye = target + dir * distance
 
         return IsoCameraSetup(
             eye = eye,
-            target = bounds.center,
+            target = target,
             up = Vec3.UP,
             left = -halfW.toDouble(),
             right = halfW.toDouble(),
@@ -99,6 +100,50 @@ object IsoCamera {
         val up = right cross forward
         val d = point - setup.target
         return (d dot right) to (d dot up)
+    }
+
+    /** Camera basis: forward (eye → target), right and up, all unit length. */
+    private fun basis(s: IsoCameraSetup): Triple<Vec3, Vec3, Vec3> {
+        val forward = (s.target - s.eye).normalized()
+        val right = (forward cross s.up).normalized()
+        val up = right cross forward
+        return Triple(forward, right, up)
+    }
+
+    /**
+     * Pixel → world point on the horizontal plane y = [planeY].
+     * With an orthographic camera every pixel is a parallel ray, so this is exact and cheap.
+     * Returns null if the camera looks parallel to the plane.
+     */
+    fun screenToPlane(s: IsoCameraSetup, px: Float, py: Float, width: Int, height: Int, planeY: Float = 0f): Vec3? {
+        val (forward, right, up) = basis(s)
+        val vx = s.left + (px / width) * (s.right - s.left)
+        val vy = s.top - (py / height) * (s.top - s.bottom) // screen y grows downward
+        val origin = s.eye + right * vx.toFloat() + up * vy.toFloat()
+        if (kotlin.math.abs(forward.y) < 1e-5f) return null
+        val t = (planeY - origin.y) / forward.y
+        return origin + forward * t
+    }
+
+    /** World point → pixel. Inverse of [screenToPlane]. */
+    fun worldToScreen(s: IsoCameraSetup, p: Vec3, width: Int, height: Int): Pair<Float, Float> {
+        val (x, y) = projectToScreen(s, p)
+        val px = ((x - s.left) / (s.right - s.left) * width).toFloat()
+        val py = ((s.top - y) / (s.top - s.bottom) * height).toFloat()
+        return px to py
+    }
+
+    /**
+     * How far the camera target must move on the ground so the content follows a finger that
+     * moved ([dxPx], [dyPx]) pixels.
+     */
+    fun panDelta(s: IsoCameraSetup, dxPx: Float, dyPx: Float, width: Int, height: Int): Vec3 {
+        val (_, right, up) = basis(s)
+        val unitsPerPx = ((s.right - s.left) / width).toFloat()
+        val groundUp = Vec3(up.x, 0f, up.z)
+        val sinPitch = groundUp.length.coerceAtLeast(1e-3f)
+        val rightGround = Vec3(right.x, 0f, right.z).normalized()
+        return rightGround * (-dxPx * unitsPerPx) + groundUp.normalized() * (dyPx * unitsPerPx / sinPitch)
     }
 
     internal fun Float.toRad() = (this * PI / 180.0).toFloat()

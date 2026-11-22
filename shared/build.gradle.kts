@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.android.kmp.library)
     alias(libs.plugins.compose.multiplatform)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 kotlin {
@@ -19,6 +20,7 @@ kotlin {
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(libs.compose.ui)
+            implementation(libs.kotlinx.serialization.json)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
@@ -27,6 +29,7 @@ kotlin {
             implementation(libs.filament.android)
             implementation(libs.gltfio.android)
             implementation(libs.lifecycle.runtime.compose)
+            implementation(libs.androidx.activity.compose)
         }
     }
 }

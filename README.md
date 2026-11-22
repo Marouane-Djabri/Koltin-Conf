@@ -13,6 +13,58 @@ with drag-to-rotate and pinch-to-zoom.
 | Gradle | 9.9.2 |
 | compileSdk / targetSdk / minSdk | 37 / 35 / 24 |
 
+## Basement editor (digital twin, v1)
+
+From the home screen, create a **New basement** (empty) or a **Sample basement** (4 furnished rooms).
+
+| Tool | How |
+|---|---|
+| View | drag = rotate · pinch = zoom · two fingers = pan |
+| Room | drag a rectangle on the grid; touching rooms share one wall |
+| Wall | drag along grid lines |
+| Door / Window | tap a wall (1 m wide); tap again to remove, or switch type |
+| Furniture | pick an item (Rotate sets its orientation), then tap or drag; the preview is green when it fits, red when it doesn't |
+| Select | tap furniture or a room → Rotate / Color / Delete; drag furniture to move it |
+| Erase | tap furniture, a wall or a room |
+
+Plus Undo/Redo, ⟳ 90° view rotation, Plan view (top-down), cutaway walls, and Recenter.
+Every change is saved immediately (one JSON file per house in app storage).
+
+### How it works
+
+```
+House (JSON) ─► ShellBuilder ─► GlbWriter ─► .glb bytes ─┐
+                OverlayBuilder (grid, previews)          ├─► SceneContent ─► FilamentIsoRenderer
+Catalog ─► built-in mesh or Blender .glb ────────────────┘   (list of models)   (diffs + reloads what changed)
+```
+
+- **Data model** (`model/House.kt`): grid of 0.5 m cells. Walls are a *set of unit edges*, so shared
+  walls merge automatically; rooms are *sets of cells*, which later become indoor-tracking zones.
+- **Edits** (`editor/Edits.kt`): pure `Level -> Level` functions; undo keeps old snapshots (`History`).
+- **Geometry in common code**: walls and floors are generated as triangles, then written as an
+  in-memory glTF by `GlbWriter` (pure Kotlin, output passes the official glTF validator). Filament
+  loads it with the same gltfio pipeline as any Blender file, so no custom materials are needed.
+- **Cutaway**: walls between the camera and a room are drawn 35 cm tall (`ShellBuilder.isCut`).
+- **Picking**: with an orthographic camera every pixel is a parallel ray, so
+  `IsoCamera.screenToPlane` maps a touch to a grid cell exactly. Pure math, unit-tested.
+- **Renderer** (`androidMain`): knows nothing about houses; it renders a list of glTF models,
+  reloading only models whose source changed and moving the rest with transforms.
+
+### Adding your own Blender furniture
+
+1. Model in metres. Make the footprint a multiple of 0.5 m, put the origin at the footprint
+   centre on the floor, face the front toward +Y in Blender (+Z in glTF), and apply all transforms.
+2. Use only Principled BSDF with plain colors or image textures. Name a material `fabric` (or
+   anything else listed in `recolorable`) if users should be able to recolor it.
+3. Export glTF Binary (.glb) with +Y up, then copy it to `androidApp/src/main/assets/furniture/`.
+4. Add an entry to `androidApp/src/main/assets/furniture/catalog.json`:
+   ```json
+   [{ "id": "sofa", "name": "Sofa", "category": "Living", "footprintW": 4, "footprintD": 2,
+      "height": 0.85, "file": "furniture/sofa.glb", "recolorable": ["fabric"],
+      "colors": [{"r":0.33,"g":0.42,"b":0.58}, {"r":0.62,"g":0.30,"b":0.28}] }]
+   ```
+   An entry whose `id` matches a built-in item replaces that placeholder.
+
 ## Build and run
 
 ### From the terminal (Windows)
@@ -52,15 +104,21 @@ To connect a phone: enable Developer options → **USB debugging** and accept th
 ```
 shared/                      KMP module (com.android.kotlin.multiplatform.library)
   src/commonMain/            pure Kotlin + Compose. No Filament.
-    IsoSceneConfig.kt        yaw / pitch / zoom / background / sun / ambient, plus asset fix-ups
-    IsoCamera.kt             iso camera math: eye/target/up + ortho bounds fitted to a bounding box
-    IsoSceneView.kt          `expect fun IsoSceneView(...)`: the renderer seam
-    App.kt                   shared UI: state (survives rotation) + HUD
-  src/commonTest/            IsoCameraTest: 11 tests (true-iso axes, fit, aspect, zoom, yaw wrap)
+    IsoSceneConfig.kt        yaw / pitch / zoom / pan / background / sun / ambient
+    IsoCamera.kt             iso camera: eye/target + ortho fit, screen↔floor picking, pan
+    IsoSceneView.kt          `expect fun IsoSceneView(content, config, onGesture)`: the renderer seam
+    scene/SceneContent.kt    engine-agnostic scene: glTF models + transforms, raw gestures
+    model/                   House, Level, Edge, Room, FurnitureItem, Catalog, built-in furniture
+    editor/                  pure edit functions, undo History, EditorController (tools → edits)
+    geometry/                MeshBuilder, ShellBuilder, OverlayBuilder, GlbWriter
+    storage/                 HouseStore interface, JSON, templates
+    App.kt, ui/              home screen, editor UI, isoroom demo
+  src/commonTest/            31 tests: camera, picking, edits, undo, placement rules, cutaway, GLB
   src/androidMain/           Android-only
-    IsoSceneView.android.kt  `actual`: AndroidView + SurfaceView gestures + lifecycle observer
+    IsoSceneView.android.kt  `actual`: AndroidView + SurfaceView raw gestures + lifecycle observer
     FilamentIsoRenderer.kt   Engine/Renderer/Scene/View/Camera, UiHelper + DisplayHelper,
-                             Choreographer loop, gltfio loading, lights, teardown
+                             Choreographer loop, multi-model gltfio diffing, lights, teardown
+    AndroidPlatform.kt       FileHouseStore, asset catalog loader
 androidApp/                  thin com.android.application module: MainActivity + assets/isoroom.glb
 ```
 

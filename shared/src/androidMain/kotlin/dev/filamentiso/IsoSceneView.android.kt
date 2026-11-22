@@ -5,6 +5,8 @@ import android.content.Context
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.SurfaceView
+import android.view.ViewConfiguration
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -16,48 +18,90 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import dev.filamentiso.scene.SceneContent
+import dev.filamentiso.scene.SceneGesture
+import kotlin.math.hypot
 
 /**
- * SurfaceView that turns gestures into config changes:
- * one-finger horizontal drag → yaw, pinch → zoom. Pitch never changes.
+ * SurfaceView that reports raw gestures and nothing else:
+ * one finger → Tap or DragStart/Move/End; two fingers → Pan + Zoom.
  */
 @SuppressLint("ViewConstructor")
 internal class IsoSurfaceView(
     context: Context,
-    private val currentConfig: () -> IsoSceneConfig,
-    private val onConfigChange: (IsoSceneConfig) -> Unit,
+    private val onGesture: (SceneGesture) -> Unit,
 ) : SurfaceView(context) {
 
-    /** Degrees of yaw per pixel dragged, scaled so a full-width swipe ≈ 180°. */
-    private val degreesPerPixel get() = 180f / width.coerceAtLeast(1)
-    private var lastX = 0f
-    private var dragging = false
+    private enum class Mode { NONE, PENDING, DRAG, MULTI }
+
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
+    private var mode = Mode.NONE
+    private var downX = 0f
+    private var downY = 0f
+    private var focusX = 0f
+    private var focusY = 0f
 
     private val scaleDetector = ScaleGestureDetector(
         context,
         object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(d: ScaleGestureDetector): Boolean {
-                val c = currentConfig()
-                onConfigChange(c.withZoom(c.zoom * d.scaleFactor))
+                if (mode == Mode.MULTI) onGesture(SceneGesture.Zoom(d.scaleFactor))
                 return true
             }
         },
     )
 
+    private fun centroid(e: MotionEvent, skipIndex: Int = -1): Pair<Float, Float> {
+        var sx = 0f; var sy = 0f; var n = 0
+        for (i in 0 until e.pointerCount) {
+            if (i == skipIndex) continue
+            sx += e.getX(i); sy += e.getY(i); n++
+        }
+        return if (n == 0) 0f to 0f else sx / n to sy / n
+    }
+
     @SuppressLint("ClickableViewAccessibility")
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        scaleDetector.onTouchEvent(event)
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { lastX = event.x; dragging = true }
-            MotionEvent.ACTION_POINTER_DOWN -> dragging = false // pinch takes over
-            MotionEvent.ACTION_MOVE -> if (dragging && event.pointerCount == 1 && !scaleDetector.isInProgress) {
-                val dx = event.x - lastX
-                lastX = event.x
-                val c = currentConfig()
-                // Dragging right turns the room to the right (camera orbits the other way).
-                onConfigChange(c.withYaw(c.yawDegrees - dx * degreesPerPixel))
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        scaleDetector.onTouchEvent(e)
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                mode = Mode.PENDING; downX = e.x; downY = e.y
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> dragging = false
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (mode == Mode.DRAG) onGesture(SceneGesture.DragCancel)
+                mode = Mode.MULTI
+                centroid(e).let { (x, y) -> focusX = x; focusY = y }
+            }
+            MotionEvent.ACTION_MOVE -> when (mode) {
+                Mode.PENDING -> if (hypot(e.x - downX, e.y - downY) > touchSlop) {
+                    mode = Mode.DRAG
+                    onGesture(SceneGesture.DragStart(downX, downY))
+                    onGesture(SceneGesture.DragMove(e.x, e.y))
+                }
+                Mode.DRAG -> onGesture(SceneGesture.DragMove(e.x, e.y))
+                Mode.MULTI -> if (e.pointerCount >= 2) {
+                    val (x, y) = centroid(e)
+                    onGesture(SceneGesture.Pan(x - focusX, y - focusY))
+                    focusX = x; focusY = y
+                }
+                Mode.NONE -> Unit
+            }
+            MotionEvent.ACTION_POINTER_UP -> if (mode == Mode.MULTI) {
+                // Re-anchor on the remaining fingers so the view doesn't jump.
+                centroid(e, skipIndex = e.actionIndex).let { (x, y) -> focusX = x; focusY = y }
+            }
+            MotionEvent.ACTION_UP -> {
+                when (mode) {
+                    Mode.PENDING -> onGesture(SceneGesture.Tap(e.x, e.y))
+                    Mode.DRAG -> onGesture(SceneGesture.DragEnd(e.x, e.y))
+                    else -> Unit
+                }
+                mode = Mode.NONE
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                if (mode == Mode.DRAG) onGesture(SceneGesture.DragCancel)
+                mode = Mode.NONE
+            }
         }
         return true
     }
@@ -65,32 +109,31 @@ internal class IsoSurfaceView(
 
 @Composable
 actual fun IsoSceneView(
-    assetPath: String,
+    content: SceneContent,
     config: IsoSceneConfig,
-    onConfigChange: (IsoSceneConfig) -> Unit,
+    onGesture: (SceneGesture) -> Unit,
     modifier: Modifier,
 ) {
+    val latestOnGesture by rememberUpdatedState(onGesture)
     val latestConfig by rememberUpdatedState(config)
-    val latestOnChange by rememberUpdatedState(onConfigChange)
     val rendererHolder = remember { mutableStateOf<FilamentIsoRenderer?>(null) }
     val lifecycleOwner = LocalLifecycleOwner.current
 
     AndroidView(
         modifier = modifier,
         factory = { ctx ->
-            IsoSurfaceView(
-                ctx,
-                // Gestures read/write the renderer's config synchronously, so several touch
-                // events between two recompositions don't read a stale value.
-                currentConfig = { rendererHolder.value?.currentConfig ?: latestConfig },
-                onConfigChange = { rendererHolder.value?.setConfig(it); latestOnChange(it) },
-            ).also { sv ->
-                val r = FilamentIsoRenderer(ctx, sv, assetPath, latestConfig)
+            IsoSurfaceView(ctx) { latestOnGesture(it) }.also { sv ->
+                val r = FilamentIsoRenderer(ctx, sv, latestConfig)
                 rendererHolder.value = r
                 if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) r.resume()
             }
         },
-        update = { rendererHolder.value?.setConfig(config) },
+        update = {
+            rendererHolder.value?.let { r ->
+                r.setContent(content)
+                r.setConfig(config)
+            }
+        },
         onRelease = {
             rendererHolder.value?.destroy()
             rendererHolder.value = null
@@ -110,3 +153,6 @@ actual fun IsoSceneView(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 }
+
+@Composable
+actual fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit) = BackHandler(enabled, onBack)
