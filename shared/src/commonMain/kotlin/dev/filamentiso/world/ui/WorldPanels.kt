@@ -14,6 +14,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -162,5 +167,38 @@ fun MapSlider(value: Float, range: ClosedFloatingPointRange<Float>, onChange: (F
         drawLine(MapUi.accent, Offset(0f, y), Offset(x, y), strokeWidth = 6.dp.toPx(), cap = StrokeCap.Round)
         drawCircle(MapUi.accent, radius = 10.dp.toPx(), center = Offset(x, y))
         drawCircle(MapUi.surface, radius = 5.dp.toPx(), center = Offset(x, y))
+    }
+}
+
+/** HUD of the isometric view: back, title, orbit and zoom. Fades in at the end of the transition. */
+@Composable
+fun IsoHud(world: WorldController) {
+    val mode = world.viewMode
+    val b = world.isoBuilding ?: return
+    val alpha = dev.filamentiso.world.TransitionLook.isoHudAlpha(dev.filamentiso.world.ViewModeMachine.isoAmount(mode))
+    if (alpha <= 0f) return
+    val interior = isInterior(mode)
+    Box(
+        Modifier.fillMaxSize().alpha(alpha)
+            .windowInsetsPadding(WindowInsets.safeDrawing).padding(12.dp),
+    ) {
+        Row(Modifier.align(Alignment.TopStart), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            MapChip(if (interior) "‹ Outside" else "‹ Map") { world.back() }
+            Column {
+                BasicText(b.name, style = MapUi.title)
+                BasicText(if (interior) "Interior" else "Swipe to turn · pinch to zoom", style = MapUi.small)
+            }
+        }
+        Column(Modifier.align(Alignment.CenterEnd), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            MapRoundButton("+") { world.zoomIso(1.25f) }
+            MapRoundButton("−") { world.zoomIso(0.8f) }
+        }
+        if (!interior) {
+            Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 22.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                MapChip("◀ Turn") { world.orbit(-1) }
+                MapChip("Enter ›", primary = true) { world.enterInterior() }
+                MapChip("Turn ▶") { world.orbit(1) }
+            }
+        }
     }
 }

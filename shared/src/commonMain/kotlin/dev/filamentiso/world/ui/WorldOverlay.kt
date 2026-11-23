@@ -66,9 +66,8 @@ fun placeEntities(controller: WorldController, view: MapView, buildings: List<Bu
         .take(WorldController.MAX_FULL_MODELS)
 }
 
-/** The transparent 3D layer above the map. Touches go through to the map (onGesture = null). */
-@Composable
-fun WorldOverlay(entities: List<ScreenEntity>, view: MapView, highlightId: String?, modifier: Modifier = Modifier) {
+/** The transparent 3D layer glued to the map: one model per building, pixel-space camera. */
+fun overlayScene(entities: List<ScreenEntity>, view: MapView, highlightId: String?): Pair<SceneContent, IsoSceneConfig> {
     val content = SceneContent(entities.map { e ->
         SceneModel(
             key = e.id,
@@ -84,7 +83,7 @@ fun WorldOverlay(entities: List<ScreenEntity>, view: MapView, highlightId: Strin
         shadows = false,
         sunDirection = OverlayProjector.sunDirection(GROUND_SUN, view.bearingDeg, view.tiltDeg),
     )
-    IsoSceneView(content, config, onGesture = null, modifier = modifier.fillMaxSize())
+    return content to config
 }
 
 private val HIGHLIGHT = dev.filamentiso.Rgb(0.75f, 0.95f, 0.85f)

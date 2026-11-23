@@ -2,6 +2,7 @@ package dev.filamentiso.world
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.filamentiso.geometry.SampleBuildings
@@ -153,6 +154,43 @@ class WorldController(
         } finally {
             importing = false
         }
+    }
+
+    // ---------------------------------------------------------------- isometric view
+
+    var viewMode by mutableStateOf<ViewMode>(ViewMode.Map); private set
+    /** Orbit position in 90° steps (any integer; the UI animates between steps). */
+    var isoStep by mutableIntStateOf(0); private set
+    var isoZoom by mutableFloatStateOf(1f); private set
+
+    /** The building shown in the iso view (also during both transitions). */
+    val isoBuilding: Building? get() = viewMode.buildingIdOrNull?.let { id -> buildings.firstOrNull { it.id == id } }
+
+    fun open(b: Building) {
+        if (viewMode == ViewMode.Map) { isoStep = 0; isoZoom = 1f }
+        selectedId = null
+        viewMode = ViewModeMachine.open(viewMode, b.id)
+    }
+
+    fun back() { viewMode = ViewModeMachine.back(viewMode) }
+    fun enterInterior() { viewMode = ViewModeMachine.enterInterior(viewMode) }
+
+    fun tick(dtMs: Float) {
+        if (viewMode.buildingIdOrNull != null && isoBuilding == null) { viewMode = ViewModeMachine.buildingGone(viewMode); return }
+        val before = viewMode
+        viewMode = ViewModeMachine.tick(viewMode, dtMs)
+        // Re-select the building when we land back on the map, so its sheet is still there.
+        if (before is ViewMode.TransitionToMap && viewMode == ViewMode.Map) selectedId = before.buildingId
+    }
+
+    fun orbit(steps: Int) { isoStep += steps }
+
+    /** Pinch in the iso view; pinching out past [IsoStage.EXIT_ZOOM] on the exterior goes back to the map. */
+    fun zoomIso(factor: Float) {
+        val z = isoZoom * factor
+        val m = viewMode
+        if (z < IsoStage.EXIT_ZOOM && m is ViewMode.Iso && m.sub == IsoSub.EXTERIOR) { back(); return }
+        isoZoom = z.coerceIn(IsoStage.MIN_ZOOM, IsoStage.MAX_ZOOM)
     }
 
     /** Called by the UI when the picker's file is bigger than the limit, before reading it all. */

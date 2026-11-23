@@ -45,7 +45,9 @@ class Mat4(val m: FloatArray) {
 
         fun translation(v: Vec3) = translation(v.x, v.y, v.z)
 
-        fun scale(s: Float) = Mat4(floatArrayOf(s, 0f, 0f, 0f, 0f, s, 0f, 0f, 0f, 0f, s, 0f, 0f, 0f, 0f, 1f))
+        fun scale(s: Float) = scale(s, s, s)
+
+        fun scale(x: Float, y: Float, z: Float) = Mat4(floatArrayOf(x, 0f, 0f, 0f, 0f, y, 0f, 0f, 0f, 0f, z, 0f, 0f, 0f, 0f, 1f))
 
         /** Right-handed rotation about +X. */
         fun rotationX(degrees: Float): Mat4 {

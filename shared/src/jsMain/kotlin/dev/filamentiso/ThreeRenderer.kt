@@ -46,9 +46,9 @@ class ThreeRenderer(private val onAsyncChange: () -> Unit) {
         renderer = js("new (require('three').WebGLRenderer)(opts)")
         renderer.setPixelRatio(1)
         renderer.outputColorSpace = THREE.SRGBColorSpace
-        renderer.toneMapping = THREE.ACESFilmicToneMapping
+        renderer.toneMapping = THREE.NeutralToneMapping // keeps pastel colours (ACES shifts hues)
         renderer.shadowMap.enabled = true
-        renderer.shadowMap.type = THREE.PCFSoftShadowMap
+        renderer.shadowMap.type = THREE.PCFShadowMap
         sun = js("new (require('three').DirectionalLight)(0xfff7eb, 1.0)")
         sun.castShadow = true
         sun.shadow.mapSize.set(2048, 2048)
@@ -256,6 +256,9 @@ class ThreeRenderer(private val onAsyncChange: () -> Unit) {
         camera.near = s.near; camera.far = s.far
         camera.position.set(s.eye.x, s.eye.y, s.eye.z)
         camera.up.set(s.up.x, s.up.y, s.up.z)
+        // lookAt() reads the world matrix, which is stale with matrixAutoUpdate off: refresh it first.
+        camera.updateMatrix()
+        camera.updateMatrixWorld(true)
         camera.lookAt(s.target.x, s.target.y, s.target.z)
         camera.updateMatrix()
         camera.updateMatrixWorld(true)

@@ -31,6 +31,9 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import dev.filamentiso.resources.Res
 import dev.filamentiso.world.WorldController
+import dev.filamentiso.world.ViewMode
+import dev.filamentiso.PlatformBackHandler
+import androidx.compose.runtime.withFrameNanos
 import dev.filamentiso.world.geo.LatLng
 import dev.filamentiso.world.geo.Places
 import dev.filamentiso.world.geo.toPosition
@@ -55,10 +58,11 @@ private const val OSM_COPYRIGHT = "https://www.openstreetmap.org/copyright"
 
 /**
  * The world map: pastel MapLibre map, the transparent 3D overlay with the buildings, and the HUD.
- * [onEnter] opens a building in the isometric view.
+ * Tapping a building's "Enter" switches to the isometric view (see [WorldScene], [ViewModeMachine]).
+ * [isoExtras] lets the interior editor add its models and take over gestures.
  */
 @Composable
-fun MapScreen(world: WorldController, onOpenTwins: () -> Unit, onEnter: (Building) -> Unit = {}) {
+fun MapScreen(world: WorldController, onOpenTwins: () -> Unit, isoExtras: @Composable () -> IsoExtras = { IsoExtras() }) {
     val styleJson by produceState<String?>(null) {
         value = Res.readBytes(STYLE_PATH).decodeToString()
     }
@@ -104,6 +108,38 @@ fun MapScreen(world: WorldController, onOpenTwins: () -> Unit, onEnter: (Buildin
     }
     world.lastEntities = entities
 
+    // ---- Map ↔ iso transition: shared state machine, driven by real frame time.
+    val mode = world.viewMode
+    val transitioning = mode is ViewMode.TransitionToIso || mode is ViewMode.TransitionToMap
+    LaunchedEffect(transitioning) {
+        if (!transitioning) return@LaunchedEffect
+        var last = withFrameNanos { it }
+        while (world.viewMode.let { it is ViewMode.TransitionToIso || it is ViewMode.TransitionToMap }) {
+            val now = withFrameNanos { it }
+            world.tick((now - last) / 1_000_000f)
+            last = now
+        }
+    }
+    // The map camera centres and zooms on the building, and returns exactly where it was afterwards.
+    var returnCamera by remember { mutableStateOf<CameraPosition?>(null) }
+    LaunchedEffect(mode::class) {
+        val ease = CameraAnimation.Ease(CameraAnimation.Ease.Standard) { duration = 360.milliseconds }
+        when (mode) {
+            is ViewMode.TransitionToIso -> {
+                val b = world.isoBuilding ?: return@LaunchedEffect
+                if (returnCamera == null) returnCamera = mapState.cameraPosition
+                val zoom = maxOf(mapState.cameraPosition.zoom, 18.8)
+                mapState.animateCamera(CameraUpdate(center = b.position.toPosition(), zoom = zoom), ease)
+            }
+            is ViewMode.TransitionToMap -> {
+                returnCamera?.let { mapState.animateCamera(it.toCameraUpdate(), ease) }
+                returnCamera = null
+            }
+            else -> Unit
+        }
+    }
+    PlatformBackHandler(enabled = mode != ViewMode.Map) { world.back() }
+
     Box(Modifier.fillMaxSize().onSizeChanged { sizePx = it }) {
         MaplibreMap(
             modifier = Modifier.fillMaxSize(),
@@ -112,15 +148,15 @@ fun MapScreen(world: WorldController, onOpenTwins: () -> Unit, onEnter: (Buildin
             overlay = {}, // our own HUD below, with an always-visible attribution
         )
         if (view != null) {
-            WorldOverlay(entities, view, highlightId = world.selectedId ?: placing?.id)
-            BuildingBubbles(view, shown) { world.selectedId = it.id }
+            WorldScene(world, view, entities, isoExtras())
+            if (mapHudVisible(mode)) BuildingBubbles(view, shown) { world.selectedId = it.id }
         }
-        MapHud(mapState, world, onOpenTwins, onEnter)
+        if (mapHudVisible(mode)) MapHud(mapState, world, onOpenTwins) else IsoHud(world)
     }
 }
 
 @Composable
-private fun MapHud(mapState: MapState, world: WorldController, onOpenTwins: () -> Unit, onEnter: (Building) -> Unit) {
+private fun MapHud(mapState: MapState, world: WorldController, onOpenTwins: () -> Unit) {
     val scope = rememberCoroutineScope()
     val myLocation = rememberMyLocation()
     val uriHandler = LocalUriHandler.current
@@ -153,7 +189,7 @@ private fun MapHud(mapState: MapState, world: WorldController, onOpenTwins: () -
                 placing != null -> PlacementPanel(world, placing, onDone = { scope.launch { world.finishPlacing() } })
                 selected != null -> BuildingSheet(
                     selected,
-                    onEnter = { onEnter(selected) },
+                    onEnter = { world.open(selected) },
                     onMove = {
                         world.startPlacing(selected)
                         flyTo(selected.position, mapState.cameraPosition.zoom.coerceAtLeast(17.0))
