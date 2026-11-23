@@ -4,7 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
-import android.view.SurfaceView
+import android.view.TextureView
 import android.view.ViewConfiguration
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
@@ -23,14 +23,17 @@ import dev.filamentiso.scene.SceneGesture
 import kotlin.math.hypot
 
 /**
- * SurfaceView that reports raw gestures and nothing else:
+ * TextureView (composes correctly above the map and below the HUD) that reports raw gestures:
  * one finger → Tap or DragStart/Move/End; two fingers → Pan + Zoom.
  */
 @SuppressLint("ViewConstructor")
-internal class IsoSurfaceView(
+internal class IsoTextureView(
     context: Context,
     private val onGesture: (SceneGesture) -> Unit,
-) : SurfaceView(context) {
+) : TextureView(context) {
+
+    /** Off on the map overlay: touches then fall through to the map below. */
+    var gesturesEnabled = true
 
     private enum class Mode { NONE, PENDING, DRAG, MULTI }
 
@@ -62,6 +65,7 @@ internal class IsoSurfaceView(
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (!gesturesEnabled) { mode = Mode.NONE; return false }
         scaleDetector.onTouchEvent(e)
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -111,7 +115,7 @@ internal class IsoSurfaceView(
 actual fun IsoSceneView(
     content: SceneContent,
     config: IsoSceneConfig,
-    onGesture: (SceneGesture) -> Unit,
+    onGesture: ((SceneGesture) -> Unit)?,
     modifier: Modifier,
 ) {
     val latestOnGesture by rememberUpdatedState(onGesture)
@@ -122,13 +126,15 @@ actual fun IsoSceneView(
     AndroidView(
         modifier = modifier,
         factory = { ctx ->
-            IsoSurfaceView(ctx) { latestOnGesture(it) }.also { sv ->
+            IsoTextureView(ctx) { g -> latestOnGesture?.invoke(g) }.also { sv ->
+                sv.gesturesEnabled = latestOnGesture != null
                 val r = FilamentIsoRenderer(ctx, sv, latestConfig)
                 rendererHolder.value = r
                 if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) r.resume()
             }
         },
-        update = {
+        update = { v ->
+            v.gesturesEnabled = onGesture != null
             rendererHolder.value?.let { r ->
                 r.setContent(content)
                 r.setConfig(config)

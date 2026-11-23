@@ -42,6 +42,11 @@ import dev.filamentiso.ui.EditorScreen
 import dev.filamentiso.ui.Pill
 import dev.filamentiso.ui.Ui
 import dev.filamentiso.world.ui.MapScreen
+import dev.filamentiso.world.WorldController
+import dev.filamentiso.world.DemoContent
+import dev.filamentiso.storage.BlobStore
+import dev.filamentiso.storage.BlobAssetStore
+import dev.filamentiso.storage.BlobBuildingRepository
 
 /**
  * Shared app: world map → house list → editor, plus the original isoroom.glb viewer.
@@ -49,7 +54,8 @@ import dev.filamentiso.world.ui.MapScreen
  * over the built-in placeholders; an entry with the same id replaces the built-in one.
  */
 @Composable
-fun App(store: HouseStore, extraCatalog: List<CatalogItem> = emptyList()) {
+fun App(store: HouseStore, blobs: BlobStore, extraCatalog: List<CatalogItem> = emptyList()) {
+    val world = remember(blobs) { WorldController(BlobBuildingRepository(blobs), BlobAssetStore(blobs), DemoContent.firstRunFlag(blobs)) }
     val catalog = remember(extraCatalog) { Catalog(extraCatalog + BuiltinCatalog.items) }
     var houses by remember { mutableStateOf(store.list()) }
     // "map", "home", "demo" or "edit:<houseId>" — a String so it survives rotation.
@@ -60,7 +66,7 @@ fun App(store: HouseStore, extraCatalog: List<CatalogItem> = emptyList()) {
     PlatformBackHandler(enabled = screen != "map") { refresh(); screen = if (screen == "home") "map" else "home" }
 
     when {
-        screen == "map" -> MapScreen(onOpenTwins = { refresh(); screen = "home" })
+        screen == "map" -> MapScreen(world, onOpenTwins = { refresh(); screen = "home" })
         screen == "demo" -> DemoScreen(onBack = { screen = "home" })
         screen.startsWith("edit:") -> {
             val id = screen.removePrefix("edit:")

@@ -96,6 +96,47 @@ class MeshBuilder {
         }
     }
 
+    /**
+     * Gable roof over the rectangle [x0, x1] x [z0, z1], eaves at [y0], ridge at [y1].
+     * The ridge runs along X when [ridgeAlongX], otherwise along Z. Gable ends use [gable].
+     */
+    fun gableRoof(
+        m: MaterialSpec, x0: Float, z0: Float, x1: Float, z1: Float, y0: Float, y1: Float,
+        ridgeAlongX: Boolean = true, gable: MaterialSpec = m,
+    ) {
+        if (ridgeAlongX) {
+            val zm = (z0 + z1) / 2
+            val d = z1 - zm; val h = y1 - y0
+            quad(m, Vec3(x0, y0, z1), Vec3(x1, y0, z1), Vec3(x1, y1, zm), Vec3(x0, y1, zm), Vec3(0f, d, h).normalized())
+            quad(m, Vec3(x0, y0, z0), Vec3(x1, y0, z0), Vec3(x1, y1, zm), Vec3(x0, y1, zm), Vec3(0f, d, -h).normalized())
+            tri(gable, Vec3(x0, y0, z0), Vec3(x0, y0, z1), Vec3(x0, y1, zm), Vec3(-1f, 0f, 0f))
+            tri(gable, Vec3(x1, y0, z0), Vec3(x1, y0, z1), Vec3(x1, y1, zm), Vec3(1f, 0f, 0f))
+        } else {
+            val xm = (x0 + x1) / 2
+            val d = x1 - xm; val h = y1 - y0
+            quad(m, Vec3(x1, y0, z0), Vec3(x1, y0, z1), Vec3(xm, y1, z1), Vec3(xm, y1, z0), Vec3(h, d, 0f).normalized())
+            quad(m, Vec3(x0, y0, z0), Vec3(x0, y0, z1), Vec3(xm, y1, z1), Vec3(xm, y1, z0), Vec3(-h, d, 0f).normalized())
+            tri(gable, Vec3(x0, y0, z0), Vec3(x1, y0, z0), Vec3(xm, y1, z0), Vec3(0f, 0f, -1f))
+            tri(gable, Vec3(x0, y0, z1), Vec3(x1, y0, z1), Vec3(xm, y1, z1), Vec3(0f, 0f, 1f))
+        }
+    }
+
+    /** Low-poly hemisphere (or a squashed one with [heightScale]) sitting on y = [y0]. */
+    fun dome(m: MaterialSpec, cx: Float, cz: Float, y0: Float, radius: Float, sides: Int = 12, rings: Int = 4, heightScale: Float = 1f) {
+        fun p(ring: Int, i: Int): Vec3 {
+            val lat = (PI / 2) * ring / rings
+            val lon = 2 * PI * i / sides
+            val r = radius * cos(lat).toFloat()
+            return Vec3(cx + r * cos(lon).toFloat(), y0 + radius * heightScale * sin(lat).toFloat(), cz + r * sin(lon).toFloat())
+        }
+        val c = Vec3(cx, y0, cz)
+        for (ring in 0 until rings) for (i in 0 until sides) {
+            val a = p(ring, i); val b = p(ring, i + 1); val t1 = p(ring + 1, i + 1); val t0 = p(ring + 1, i)
+            val mid = ((a + b + t1 + t0) * 0.25f - c).let { Vec3(it.x, it.y / heightScale, it.z) }.normalized()
+            if (ring == rings - 1) tri(m, a, b, t0, mid) else quad(m, a, b, t1, t0, mid)
+        }
+    }
+
     fun isEmpty() = parts.values.all { it.idx.isEmpty() }
 
     fun build(): List<MeshPart> = parts.filterValues { it.idx.isNotEmpty() }.map { (m, a) ->

@@ -16,7 +16,8 @@ import dev.filamentiso.scene.SceneGesture
 expect fun IsoSceneView(
     content: SceneContent,
     config: IsoSceneConfig,
-    onGesture: (SceneGesture) -> Unit,
+    /** Null = the view ignores touches and lets them through to what is below (map overlay). */
+    onGesture: ((SceneGesture) -> Unit)?,
     modifier: Modifier = Modifier,
 )
 

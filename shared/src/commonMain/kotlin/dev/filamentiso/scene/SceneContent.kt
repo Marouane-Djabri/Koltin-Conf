@@ -1,6 +1,7 @@
 package dev.filamentiso.scene
 
 import dev.filamentiso.Bounds
+import dev.filamentiso.Mat4
 import dev.filamentiso.Rgb
 import dev.filamentiso.Vec3
 
@@ -27,6 +28,8 @@ data class SceneModel(
     val source: ModelSource,
     val position: Vec3 = Vec3(0f, 0f, 0f),
     val rotationYDegrees: Float = 0f,
+    /** Full world matrix; when set it replaces [position] and [rotationYDegrees]. Built in shared code. */
+    val transform: Mat4? = null,
     /** Overrides every material's base color (used for the green/red placement ghost). */
     val tint: Rgb? = null,
     /** Material name → base color (user-chosen furniture colors). */

@@ -6,6 +6,7 @@ import kotlin.math.max
 import kotlin.math.sin
 import kotlin.math.sqrt
 
+@kotlinx.serialization.Serializable
 data class Vec3(val x: Float, val y: Float, val z: Float) {
     operator fun plus(o: Vec3) = Vec3(x + o.x, y + o.y, z + o.z)
     operator fun minus(o: Vec3) = Vec3(x - o.x, y - o.y, z - o.z)

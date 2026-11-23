@@ -38,6 +38,11 @@ data class IsoSceneConfig(
     val hiddenNodes: Set<String> = emptySet(),
     /** Materials (by glTF name) that exported without PBR data; rendered as matte dielectrics. */
     val matteMaterials: Set<String> = emptySet(),
+    /** Use this camera as is instead of fitting the content (map overlay, transitions). */
+    val camera: IsoCameraSetup? = null,
+    /** Clear to transparent so whatever is below the view (the map) shows through. */
+    val transparent: Boolean = false,
+    val shadows: Boolean = true,
 ) {
     companion object {
         /** atan(1/√2) in degrees: the pitch of a true isometric projection. */

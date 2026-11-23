@@ -14,6 +14,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val store = FileHouseStore(this)
         val extraCatalog = loadAssetCatalog(this)
-        setContent { App(store = store, extraCatalog = extraCatalog) }
+        val blobs = dev.filamentiso.storage.FileBlobStore(this)
+        setContent { App(store = store, blobs = blobs, extraCatalog = extraCatalog) }
     }
 }

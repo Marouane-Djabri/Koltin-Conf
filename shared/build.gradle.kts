@@ -32,9 +32,13 @@ kotlin {
             implementation(libs.maplibre.compose)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.filekit.dialogs.compose) // file picker: system picker on Android, <input type=file> on the Web
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
+        }
+        jsMain.dependencies {
+            implementation(npm("three", libs.versions.three.get()))
         }
         androidMain.dependencies {
             implementation(libs.maplibre.native.runtime.opengl.android) // the native map engine (libmaplibre-native-c.so)

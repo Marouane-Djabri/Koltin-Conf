@@ -1,5 +1,6 @@
 package dev.filamentiso.glb
 
+import dev.filamentiso.Mat4
 import dev.filamentiso.Vec3
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -209,7 +210,7 @@ object GlbValidator {
         fun walk(index: Int, parent: Mat4, depth: Int) {
             if (depth > 64 || !visiting.add(index)) fail(GlbProblem.Corrupt("node hierarchy has a cycle"))
             val node = nodes.getOrNull(index)?.jsonObject ?: fail(GlbProblem.Corrupt("missing node $index"))
-            val world = parent * Mat4.ofNode(node)
+            val world = parent * nodeMatrix(node)
             node.int("mesh")?.let { mi ->
                 if (mi !in meshes.indices) fail(GlbProblem.Corrupt("missing mesh $mi"))
                 triangles += meshTris[mi]
@@ -283,6 +284,20 @@ object GlbValidator {
         val len = minOf(v.int("byteLength") ?: 0, 64 * 1024) // headers are at the start
         if (start + len > bin.size) return null
         return bin.copyOfRange(start, start + len)
+    }
+
+    /** A glTF node's local transform: `matrix`, or T * R * S. */
+    private fun nodeMatrix(node: JsonObject): Mat4 {
+        (node["matrix"] as? JsonArray)?.floats(16)?.let { return Mat4(it) }
+        val t = (node["translation"] as? JsonArray)?.floats(3) ?: floatArrayOf(0f, 0f, 0f)
+        val q = (node["rotation"] as? JsonArray)?.floats(4) ?: floatArrayOf(0f, 0f, 0f, 1f)
+        val s = (node["scale"] as? JsonArray)?.floats(3) ?: floatArrayOf(1f, 1f, 1f)
+        return Mat4.trs(t, q, s)
+    }
+
+    private fun JsonArray.floats(n: Int): FloatArray? {
+        if (size != n) return null
+        return FloatArray(n) { (this[it] as? JsonPrimitive)?.floatOrNull ?: return null }
     }
 
     // --- tiny JSON helpers ---

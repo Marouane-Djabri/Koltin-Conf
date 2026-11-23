@@ -4,7 +4,7 @@ import android.content.Context
 import android.util.Log
 import android.view.Choreographer
 import android.view.Surface
-import android.view.SurfaceView
+import android.view.TextureView
 import com.google.android.filament.Box
 import com.google.android.filament.Camera
 import com.google.android.filament.Colors
@@ -37,14 +37,14 @@ import kotlin.math.pow
 import kotlin.math.sin
 
 /**
- * Owns every Filament object for one [SurfaceView] and keeps the Filament scene in sync
+ * Owns every Filament object for one [TextureView] and keeps the Filament scene in sync
  * with a [SceneContent] (a list of glTF models) by diffing on each [setContent].
  *
  * Create on the main thread, call [resume]/[pause] with the lifecycle and [destroy] once.
  */
 class FilamentIsoRenderer(
     private val context: Context,
-    private val surfaceView: SurfaceView,
+    private val targetView: TextureView,
     initialConfig: IsoSceneConfig,
 ) : Choreographer.FrameCallback {
 
@@ -91,8 +91,12 @@ class FilamentIsoRenderer(
         view.camera = camera
         applyBackground()
         applyLighting()
+        view.isShadowingEnabled = config.shadows
         uiHelper.renderCallback = SurfaceCallback()
-        uiHelper.attachTo(surfaceView)
+        // Always translucent: the same view draws the map overlay (transparent) and the iso scene (opaque clear).
+        uiHelper.isOpaque = false
+        view.blendMode = View.BlendMode.TRANSLUCENT
+        uiHelper.attachTo(targetView)
     }
 
     // ---------------------------------------------------------------- public API
@@ -101,10 +105,18 @@ class FilamentIsoRenderer(
         if (destroyed || newConfig == config) return
         val old = config
         config = newConfig
-        if (old.backgroundColor != newConfig.backgroundColor) applyBackground()
-        if (old.sunDirection != newConfig.sunDirection || old.sunIntensity != newConfig.sunIntensity ||
-            old.ambientIntensity != newConfig.ambientIntensity
-        ) applyLighting()
+        if (old.backgroundColor != newConfig.backgroundColor || old.transparent != newConfig.transparent) applyBackground()
+        if (old.sunIntensity != newConfig.sunIntensity || old.ambientIntensity != newConfig.ambientIntensity ||
+            old.shadows != newConfig.shadows
+        ) {
+            applyLighting()
+        } else if (old.sunDirection != newConfig.sunDirection) {
+            // The map overlay turns the sun with the map every frame: just update the direction.
+            val lm = engine.lightManager
+            val d = newConfig.sunDirection.normalized()
+            lm.setDirection(lm.getInstance(sunEntity), d.x, d.y, d.z)
+        }
+        view.isShadowingEnabled = newConfig.shadows
         updateCamera()
     }
 
@@ -128,11 +140,12 @@ class FilamentIsoRenderer(
             } else if (cur.model != m) {
                 applyInstanceState(cur.asset, m)
                 loaded[m.key] = Loaded(m, cur.asset, cur.hidden)
-                if (cur.model.position != m.position || cur.model.rotationYDegrees != m.rotationYDegrees) geometryChanged = true
+                if (cur.model.position != m.position || cur.model.rotationYDegrees != m.rotationYDegrees || cur.model.transform != m.transform) geometryChanged = true
             }
         }
 
-        val newBounds = newContent.fitBounds ?: if (geometryChanged) computeVisibleBounds() else bounds
+        // With a fixed camera (map overlay) there is nothing to fit, so skip the bounds walk.
+        val newBounds = newContent.fitBounds ?: if (geometryChanged && config.camera == null) computeVisibleBounds() else bounds
         if (newBounds != bounds) {
             bounds = newBounds
             updateCamera()
@@ -263,7 +276,7 @@ class FilamentIsoRenderer(
             s, 0f, c, 0f,
             p.x, p.y, p.z, 1f,
         )
-        tm.setTransform(tm.getInstance(a.root), mat)
+        tm.setTransform(tm.getInstance(a.root), m.transform?.m ?: mat)
         m.tint?.let { t ->
             for (mi in a.instance.materialInstances) {
                 mi.setParameter("baseColorFactor", Colors.RgbaType.SRGB, t.r, t.g, t.b, 1f)
@@ -320,7 +333,7 @@ class FilamentIsoRenderer(
             .intensity(config.sunIntensity)
             .direction(d.x, d.y, d.z)
             .sunAngularRadius(1.5f)
-            .castShadows(true)
+            .castShadows(config.shadows)
             .build(engine, sunEntity)
         scene.addEntity(sunEntity)
 
@@ -339,13 +352,13 @@ class FilamentIsoRenderer(
         renderer.clearOptions = renderer.clearOptions.apply {
             clear = true
             clearColor = doubleArrayOf(
-                srgbToLinear(c.r).toDouble(), srgbToLinear(c.g).toDouble(), srgbToLinear(c.b).toDouble(), 1.0,
+                srgbToLinear(c.r).toDouble(), srgbToLinear(c.g).toDouble(), srgbToLinear(c.b).toDouble(), if (config.transparent) 0.0 else 1.0,
             )
         }
     }
 
     private fun updateCamera() {
-        val s = IsoCamera.compute(config, bounds, viewportW.toFloat() / viewportH.toFloat())
+        val s = config.camera ?: IsoCamera.compute(config, bounds, viewportW.toFloat() / viewportH.toFloat())
         camera.setProjection(Camera.Projection.ORTHO, s.left, s.right, s.bottom, s.top, s.near, s.far)
         camera.lookAt(
             s.eye.x.toDouble(), s.eye.y.toDouble(), s.eye.z.toDouble(),
@@ -362,7 +375,7 @@ class FilamentIsoRenderer(
         override fun onNativeWindowChanged(surface: Surface) {
             swapChain?.let { engine.destroySwapChain(it) }
             swapChain = engine.createSwapChain(surface)
-            surfaceView.display?.let { displayHelper.attach(renderer, it) }
+            targetView.display?.let { displayHelper.attach(renderer, it) }
         }
 
         override fun onDetachedFromSurface() {
