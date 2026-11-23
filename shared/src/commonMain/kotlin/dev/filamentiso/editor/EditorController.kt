@@ -38,9 +38,10 @@ import kotlin.math.sin
 enum class Tool(val label: String, val hint: String) {
     VIEW("View", "Drag to rotate · pinch to zoom · two fingers to pan"),
     ROOM("Room", "Drag on the grid to draw a room"),
-    WALL("Wall", "Drag along grid lines to add a wall"),
+    WALL("Wall", "Tap a tile edge to add / remove a wall · drag along grid lines for long walls"),
     DOOR("Door", "Tap a wall to add / remove a door"),
     WINDOW("Window", "Tap a wall to add / remove a window"),
+    PAINT("Paint", "Tap or drag over tiles to paint the floor"),
     FURNITURE("Furniture", "Pick an item, then tap or drag inside a room"),
     SELECT("Select", "Tap to select · drag furniture to move it"),
     ERASE("Erase", "Tap furniture, a wall or a room to delete it"),
@@ -59,11 +60,19 @@ data class Ghost(val item: FurnitureItem, val valid: Boolean, val hidesId: Strin
  * class turns them into grid coordinates (via [IsoCamera.screenToPlane]) and Level edits.
  * State is Compose state, so the UI recomposes when it changes.
  */
+/** An imported model, already fitted to its catalog footprint (see [dev.filamentiso.glb.Normalization.fitInto]). */
+class ExternalModel(val source: ModelSource, val normalization: dev.filamentiso.glb.Normalization)
+
 class EditorController(
     initial: House,
-    val catalog: Catalog,
+    catalog: Catalog,
     private val onSave: (House) -> Unit,
+    /** Model for imported furniture (catalog items with an assetId); null while it loads. */
+    private val externalModel: (CatalogItem) -> ExternalModel? = { null },
 ) {
+    /** Can change while editing (imported furniture is added to it). */
+    var catalog by mutableStateOf(catalog)
+    var paintMaterial by mutableStateOf(dev.filamentiso.model.FloorMaterial.WOOD)
     private val history = History(initial.level)
 
     var house by mutableStateOf(initial); private set
@@ -191,6 +200,11 @@ class EditorController(
         }
     }
 
+    fun setStatusSelected(status: dev.filamentiso.model.Status?) {
+        val f = selectedFurniture ?: return
+        apply { it.setStatus(f.id, if (f.status == status) null else status) }
+    }
+
     fun deleteSelected() {
         selectedFurniture?.let { f -> apply { it.removeFurniture(f.id) }; selection = null; return }
         selectedRoom?.let { r -> apply { it.removeRoomAt(r.cells.first(), catalog) }; selection = null }
@@ -240,6 +254,17 @@ class EditorController(
         return null
     }
 
+    /** Nearest tile edge (wall or not) to a touch on the floor, within 40 % of a tile. */
+    private fun edgeNear(x: Float, y: Float): Edge? {
+        val p = point(x, y) ?: return null
+        val u = p.x / level.cellSize; val v = p.z / level.cellSize
+        val hz = v.roundToInt(); val vx = u.roundToInt()
+        return listOf(
+            abs(v - hz) to Edge.of(GridPoint(floor(u).toInt(), hz), GridPoint(floor(u).toInt() + 1, hz)),
+            abs(u - vx) to Edge.of(GridPoint(vx, floor(v).toInt()), GridPoint(vx, floor(v).toInt() + 1)),
+        ).filter { it.first < 0.4f }.minByOrNull { it.first }?.second
+    }
+
     /** Furniture under the touch. Tests a few heights so tall items are hit where they're drawn. */
     private fun furnitureAt(x: Float, y: Float): FurnitureItem? {
         for (planeY in floatArrayOf(1.4f, 0.9f, 0.45f, 0.05f)) {
@@ -261,6 +286,7 @@ class EditorController(
         data class RoomRect(val start: GridPoint) : Drag
         data class WallLine(val start: GridPoint) : Drag
         data object Place : Drag
+        data class Paint(var last: GridPoint? = null) : Drag
         data class Move(val id: String, val grab: GridPoint) : Drag
         data object Ignore : Drag
     }
@@ -285,7 +311,14 @@ class EditorController(
 
     private fun onTap(x: Float, y: Float) {
         when (tool) {
-            Tool.VIEW, Tool.ROOM, Tool.WALL -> message = tool.hint
+            Tool.VIEW, Tool.ROOM -> message = tool.hint
+            Tool.WALL -> {
+                val e = edgeNear(x, y)
+                if (e == null) message = "Tap closer to a tile edge" else apply { it.toggleWall(e) }
+            }
+            Tool.PAINT -> cellAt(x, y)?.let { c ->
+                if (!level.isRoomCell(c)) message = "Paint inside a room" else apply { it.paintTiles(setOf(c), paintMaterial) }
+            }
             Tool.DOOR, Tool.WINDOW -> {
                 val e = wallAt(x, y)
                 if (e == null) message = "Tap directly on a wall"
@@ -317,6 +350,7 @@ class EditorController(
             Tool.ROOM -> cellAt(x, y)?.let { Drag.RoomRect(clampCell(it)) }
             Tool.WALL -> vertexAt(x, y)?.let { Drag.WallLine(it) }
             Tool.FURNITURE -> Drag.Place
+            Tool.PAINT -> Drag.Paint()
             Tool.SELECT -> furnitureAt(x, y)?.let { f ->
                 selection = Selection.Furniture(f.id)
                 val c = cellAt(x, y, (catalog[f.catalogId]?.height ?: 0f).coerceAtMost(0.45f)) ?: f.cell
@@ -333,6 +367,12 @@ class EditorController(
             is Drag.RoomRect -> cellAt(x, y)?.let { overlay = OverlayState(previewCells = rectCells(d.start, clampCell(it))) }
             is Drag.WallLine -> vertexAt(x, y)?.let { overlay = OverlayState(previewEdges = wallLineEdges(d.start, it).toSet()) }
             Drag.Place -> ghost = ghostAt(x, y)
+            is Drag.Paint -> cellAt(x, y)?.let { c ->
+                // Fill the cells between two touch samples so fast strokes leave no gaps.
+                val stroke = d.last?.let { cellLine(it, c) } ?: listOf(c)
+                d.last = c
+                overlay = OverlayState(previewCells = overlay.previewCells + stroke.filter { level.isRoomCell(it) })
+            }
             is Drag.Move -> {
                 val f = level.furniture.firstOrNull { it.id == d.id } ?: return
                 val h = (catalog[f.catalogId]?.height ?: 0f).coerceAtMost(0.45f)
@@ -353,6 +393,7 @@ class EditorController(
             is Drag.WallLine -> overlay.previewEdges.takeIf { it.isNotEmpty() }?.let { edges ->
                 apply { it.copy(walls = it.walls + edges) }
             }
+            is Drag.Paint -> overlay.previewCells.takeIf { it.isNotEmpty() }?.let { cells -> apply { it.paintTiles(cells, paintMaterial) } }
             Drag.Place -> ghost?.let { g ->
                 if (g.valid) apply { it.placeFurniture(g.item.copy(id = newId("f_")), catalog) }
                 else message = problemText(g.item, null)
@@ -447,9 +488,19 @@ class EditorController(
 
     private fun furnitureModel(f: FurnitureItem, key: String): SceneModel? {
         val def = catalog[f.catalogId] ?: return null
-        val src = catalogSource(def) ?: return null
         val (w, d) = def.footprint(f.quarterTurns)
         val cs = level.cellSize
+        if (def.assetId != null) {
+            // Imported .glb: fitted to its footprint by a matrix, never by editing the file.
+            val ext = externalModel(def) ?: return null
+            val n = ext.normalization
+            val m = dev.filamentiso.Mat4.translation((f.cell.x + w / 2f) * cs, 0f, (f.cell.z + d / 2f) * cs) *
+                dev.filamentiso.Mat4.rotationY(f.quarterTurns * 90f) *
+                dev.filamentiso.Mat4.scale(n.fitScale) *
+                dev.filamentiso.Mat4.translation(Vec3(-n.pivot.x, -n.pivot.y, -n.pivot.z))
+            return SceneModel(key = key, source = ext.source, transform = m)
+        }
+        val src = catalogSource(def) ?: return null
         return SceneModel(
             key = key,
             source = src,

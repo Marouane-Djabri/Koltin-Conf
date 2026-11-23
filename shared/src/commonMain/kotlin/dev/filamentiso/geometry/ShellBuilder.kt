@@ -53,9 +53,11 @@ object ShellBuilder {
     private fun buildFloors(level: Level, mb: MeshBuilder) {
         val cs = level.cellSize
         val allCells = level.rooms.flatMap { it.cells }.toSet()
+        val painted = dev.filamentiso.model.FloorMaterial.entries.associateWith { MaterialSpec("floor_${it.name.lowercase()}", it.color, roughness = 0.9f) }
         for (room in level.rooms) {
-            val mat = MaterialSpec("floor_${room.id}", room.floorColor, roughness = 0.9f)
+            val roomMat = MaterialSpec("floor_${room.id}", room.floorColor, roughness = 0.9f)
             for (c in room.cells) {
+                val mat = level.tiles[c]?.let { painted.getValue(it) } ?: roomMat
                 val x0 = c.x * cs; val z0 = c.z * cs; val x1 = x0 + cs; val z1 = z0 + cs
                 mb.quad(mat, dev.filamentiso.Vec3(x0, 0f, z0), dev.filamentiso.Vec3(x1, 0f, z0),
                     dev.filamentiso.Vec3(x1, 0f, z1), dev.filamentiso.Vec3(x0, 0f, z1), dev.filamentiso.Vec3(0f, 1f, 0f))

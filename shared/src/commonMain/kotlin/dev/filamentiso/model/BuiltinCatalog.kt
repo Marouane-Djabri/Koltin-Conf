@@ -22,7 +22,7 @@ object BuiltinCatalog {
             colors = if (recolor) FABRICS else emptyList(), floorLayer = floor)
 
     val items: List<CatalogItem> = listOf(
-        item("sofa", "Sofa", "Living", 4, 2, 0.85f, recolor = true),
+        item("sofa", "Couch", "Living", 4, 2, 0.85f, recolor = true),
         item("armchair", "Armchair", "Living", 2, 2, 0.85f, recolor = true),
         item("tv", "TV stand", "Living", 3, 1, 1.15f),
         item("rug", "Rug", "Living", 4, 3, 0.02f, recolor = true, floor = true),
@@ -33,6 +33,8 @@ object BuiltinCatalog {
         item("chair", "Chair", "Dining", 1, 1, 0.9f),
         item("desk", "Desk", "Office", 3, 2, 1.2f),
         item("bookshelf", "Bookshelf", "Office", 2, 1, 1.8f),
+        item("counter", "Kitchen counter", "Kitchen", 4, 1, 0.92f),
+        item("coffee", "Coffee machine", "Kitchen", 1, 1, 1.3f),
         item("workbench", "Workbench", "Basement", 4, 2, 1.6f),
         item("shelving", "Metal shelving", "Basement", 2, 1, 1.8f),
         item("boxes", "Storage boxes", "Basement", 1, 1, 0.75f),
@@ -188,6 +190,20 @@ object BuiltinCatalog {
                     val zFront = 1.5f - i * run
                     b.box(WOOD, -0.48f, 0f, zFront - run, 0.48f, (i + 1) * rise, zFront)
                 }
+            }
+            "counter" -> {
+                b.box(WHITE, -0.98f, 0.08f, -0.24f, 0.98f, 0.86f, 0.24f)            // cabinets
+                b.box(DARK_WOOD, -0.98f, 0f, -0.2f, 0.98f, 0.08f, 0.2f)          // plinth
+                b.box(WOOD, -1.0f, 0.86f, -0.25f, 1.0f, 0.92f, 0.25f)            // worktop
+                b.box(METAL, 0.25f, 0.9f, -0.15f, 0.75f, 0.93f, 0.15f)           // sink
+                for (x in listOf(-0.75f, -0.25f, 0.25f, 0.75f)) b.box(METAL, x - 0.08f, 0.7f, 0.24f, x + 0.08f, 0.72f, 0.26f) // handles
+            }
+            "coffee" -> {
+                b.box(WOOD, -0.22f, 0f, -0.2f, 0.22f, 0.9f, 0.2f)               // little cabinet
+                b.box(BLACK, -0.14f, 0.9f, -0.14f, 0.14f, 1.25f, 0.12f)         // machine
+                b.box(METAL, -0.06f, 1.08f, 0.12f, 0.06f, 1.12f, 0.17f)          // spout
+                b.prism(WHITE, 0f, 0.1f, 0.9f, 0.98f, 0.04f, sides = 8)            // cup
+                b.box(METAL, -0.14f, 1.25f, -0.14f, 0.14f, 1.28f, 0.12f)
             }
             else -> return null
         }

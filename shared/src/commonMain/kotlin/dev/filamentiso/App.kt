@@ -72,7 +72,7 @@ fun App(store: HouseStore, blobs: BlobStore, extraCatalog: List<CatalogItem> = e
             val id = screen.removePrefix("edit:")
             val house = remember(id) { store.list().firstOrNull { it.id == id } }
             if (house == null) { screen = "home"; return }
-            val controller = remember(id) { EditorController(house, catalog) { store.save(it) } }
+            val controller = remember(id) { EditorController(house, catalog, onSave = { store.save(it) }) }
             EditorScreen(controller, onBack = { refresh(); screen = "home" })
         }
         else -> HomeScreen(

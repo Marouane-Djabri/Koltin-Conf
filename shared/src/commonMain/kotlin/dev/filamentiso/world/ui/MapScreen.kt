@@ -32,6 +32,8 @@ import androidx.compose.ui.unit.dp
 import dev.filamentiso.resources.Res
 import dev.filamentiso.world.WorldController
 import dev.filamentiso.world.ViewMode
+import dev.filamentiso.world.IsoSub
+import dev.filamentiso.world.InteriorController
 import dev.filamentiso.PlatformBackHandler
 import androidx.compose.runtime.withFrameNanos
 import dev.filamentiso.world.geo.LatLng
@@ -59,10 +61,9 @@ private const val OSM_COPYRIGHT = "https://www.openstreetmap.org/copyright"
 /**
  * The world map: pastel MapLibre map, the transparent 3D overlay with the buildings, and the HUD.
  * Tapping a building's "Enter" switches to the isometric view (see [WorldScene], [ViewModeMachine]).
- * [isoExtras] lets the interior editor add its models and take over gestures.
  */
 @Composable
-fun MapScreen(world: WorldController, onOpenTwins: () -> Unit, isoExtras: @Composable () -> IsoExtras = { IsoExtras() }) {
+fun MapScreen(world: WorldController, onOpenTwins: () -> Unit) {
     val styleJson by produceState<String?>(null) {
         value = Res.readBytes(STYLE_PATH).decodeToString()
     }
@@ -140,6 +141,12 @@ fun MapScreen(world: WorldController, onOpenTwins: () -> Unit, isoExtras: @Compo
     }
     PlatformBackHandler(enabled = mode != ViewMode.Map) { world.back() }
 
+    // Inside a building: the interior editor takes over the iso view (scene, camera, gestures).
+    val interiorScope = rememberCoroutineScope()
+    val interiorId = (mode as? ViewMode.Iso)?.takeIf { it.sub == IsoSub.INTERIOR }?.buildingId
+    val interior = interiorId?.let { id -> remember(id) { InteriorController(world, id, interiorScope) } }
+    val extras = interior?.let { ic -> IsoExtras(ic.sceneContent(), ic.config(), ic.editor::onGesture, ic.editor::setViewport) } ?: IsoExtras()
+
     Box(Modifier.fillMaxSize().onSizeChanged { sizePx = it }) {
         MaplibreMap(
             modifier = Modifier.fillMaxSize(),
@@ -148,10 +155,14 @@ fun MapScreen(world: WorldController, onOpenTwins: () -> Unit, isoExtras: @Compo
             overlay = {}, // our own HUD below, with an always-visible attribution
         )
         if (view != null) {
-            WorldScene(world, view, entities, isoExtras())
+            WorldScene(world, view, entities, extras)
             if (mapHudVisible(mode)) BuildingBubbles(view, shown) { world.selectedId = it.id }
         }
-        if (mapHudVisible(mode)) MapHud(mapState, world, onOpenTwins) else IsoHud(world)
+        when {
+            mapHudVisible(mode) -> MapHud(mapState, world, onOpenTwins)
+            interior != null -> InteriorHud(interior, world)
+            else -> IsoHud(world)
+        }
     }
 }
 

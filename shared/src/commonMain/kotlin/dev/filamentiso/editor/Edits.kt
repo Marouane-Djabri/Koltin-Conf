@@ -144,6 +144,7 @@ fun Level.removeRoomAt(cell: GridPoint, catalog: Catalog): Level {
         walls = walls - orphanWalls,
         openings = openings - orphanWalls,
         furniture = furniture.filter { f -> f.cells(catalog).none { it in room.cells } },
+        tiles = tiles - room.cells,
     )
 }
 
@@ -193,4 +194,39 @@ fun Level.rotatedFurniture(item: FurnitureItem, catalog: Catalog): FurnitureItem
 fun anchorFor(center: GridPoint, def: dev.filamentiso.model.CatalogItem, quarterTurns: Int): GridPoint {
     val (w, d) = def.footprint(quarterTurns)
     return GridPoint(center.x - (w - 1) / 2, center.z - (d - 1) / 2)
+}
+
+// ------------------------------------------------------------------ interior editor additions
+
+/** Paints floor tiles. Only cells inside a room have a floor; others are ignored. */
+fun Level.paintTiles(cells: Set<GridPoint>, material: dev.filamentiso.model.FloorMaterial): Level {
+    val paintable = cells.filter { isRoomCell(it) }
+    if (paintable.all { tiles[it] == material }) return this
+    return copy(tiles = tiles + paintable.associateWith { material })
+}
+
+/** Tap on a tile edge: adds a wall there, or removes it (with any door/window in it). */
+fun Level.toggleWall(edge: Edge): Level {
+    val inPlot = listOf(edge.a, edge.b).all { it.x in 0..plotWidth && it.z in 0..plotDepth }
+    if (!inPlot) return this
+    return if (edge in walls) removeWall(edge) else copy(walls = walls + edge)
+}
+
+fun Level.setStatus(itemId: String, status: dev.filamentiso.model.Status?): Level =
+    copy(furniture = furniture.map { if (it.id == itemId) it.copy(status = status) else it })
+
+/** Grid cells on the straight line from [a] to [b] (Bresenham), both ends included. */
+fun cellLine(a: GridPoint, b: GridPoint): List<GridPoint> {
+    val out = ArrayList<GridPoint>()
+    var x = a.x; var z = a.z
+    val dx = kotlin.math.abs(b.x - a.x); val dz = -kotlin.math.abs(b.z - a.z)
+    val sx = if (a.x < b.x) 1 else -1; val sz = if (a.z < b.z) 1 else -1
+    var err = dx + dz
+    while (true) {
+        out += GridPoint(x, z)
+        if (x == b.x && z == b.z) return out
+        val e2 = 2 * err
+        if (e2 >= dz) { err += dz; x += sx }
+        if (e2 <= dx) { err += dx; z += sz }
+    }
 }

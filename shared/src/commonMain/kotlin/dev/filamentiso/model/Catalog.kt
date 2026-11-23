@@ -26,6 +26,8 @@ data class CatalogItem(
     val colors: List<Rgb> = emptyList(),
     /** Floor-layer items (rugs) only collide with other floor-layer items. */
     val floorLayer: Boolean = false,
+    /** Imported furniture: the [dev.filamentiso.world.model.ModelAsset] id; the model is auto-fitted to the footprint. */
+    val assetId: String? = null,
 ) {
     fun footprint(quarterTurns: Int): Pair<Int, Int> =
         if (quarterTurns % 2 == 0) footprintW to footprintD else footprintD to footprintW

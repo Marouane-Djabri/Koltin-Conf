@@ -47,6 +47,23 @@ data class Edge(val a: GridPoint, val b: GridPoint) {
 @Serializable
 enum class OpeningType { DOOR, WINDOW }
 
+/** Floor finishes the Paint tool can put on a tile (sRGB, soft pastels). */
+@Serializable
+enum class FloorMaterial(val label: String, val color: Rgb) {
+    WOOD("Wood", Rgb(0.82f, 0.66f, 0.49f)),
+    TILE("Tile", Rgb(0.86f, 0.91f, 0.94f)),
+    CARPET("Carpet", Rgb(0.86f, 0.75f, 0.87f)),
+    CONCRETE("Concrete", Rgb(0.78f, 0.78f, 0.76f)),
+    TERRAZZO("Terrazzo", Rgb(0.95f, 0.90f, 0.82f)),
+}
+
+/**
+ * What people do around a piece of furniture. Prepares avatars + presence: an avatar sitting at a
+ * WORKING desk is "working", etc.
+ */
+@Serializable
+enum class Status(val label: String) { WORKING("Working"), RELAXING("Relaxing"), EATING("Eating"), SLEEPING("Sleeping"), MEETING("Meeting") }
+
 @Serializable
 data class Room(
     val id: String,
@@ -65,6 +82,8 @@ data class FurnitureItem(
     val quarterTurns: Int = 0,
     /** Applied to the catalog item's recolorable materials; null = model default. */
     val color: Rgb? = null,
+    /** Optional activity zone (see [Status]). */
+    val status: Status? = null,
 )
 
 /** One floor of a house. For now a house has a single level: the basement. */
@@ -80,6 +99,8 @@ data class Level(
     val openings: Map<Edge, OpeningType> = emptyMap(),
     val rooms: List<Room> = emptyList(),
     val furniture: List<FurnitureItem> = emptyList(),
+    /** Painted tiles; cells without an entry use their room's floor colour. */
+    val tiles: Map<GridPoint, FloorMaterial> = emptyMap(),
 ) {
     fun roomAt(cell: GridPoint): Room? = rooms.firstOrNull { cell in it.cells }
     fun isRoomCell(cell: GridPoint) = rooms.any { cell in it.cells }

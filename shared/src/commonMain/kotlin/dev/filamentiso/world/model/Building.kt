@@ -70,12 +70,18 @@ data class Building(
     val transform: ModelTransform = ModelTransform(),
     val visibility: Visibility = Visibility.PRIVATE,
     val floors: List<Level> = emptyList(),
+    /** Furniture the user imported for this building (shown in the catalog next to the built-in pieces). */
+    val importedFurniture: List<ImportedFurniture> = emptyList(),
     val formatVersion: Int = 1,
 ) {
     /** What the overlay draws. */
     val modelRef: ModelRef
         get() = asset?.let { ModelRef.Asset(it.id) } ?: ModelRef.Placeholder(placeholderKind ?: SampleBuildings.Kind.COTTAGE)
 }
+
+/** An imported .glb used as furniture: its catalog entry (footprint, height) plus the stored file. */
+@Serializable
+data class ImportedFurniture(val item: dev.filamentiso.model.CatalogItem, val asset: ModelAsset)
 
 /** Which model to draw, independent of how its bytes are loaded. */
 sealed interface ModelRef {
