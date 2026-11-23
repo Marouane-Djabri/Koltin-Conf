@@ -1,22 +1,27 @@
 [versions]
-# Checked against Maven Central / Google Maven on 2026-11-22.
+# Checked against Maven Central / Google Maven on 2026-11-22/23. Pinned for the whole contest.
 agp = "9.1.1"            # newest AGP the IntelliJ 2026.2 Android plugin (AGP 9.1 generation) can sync; 9.5.2 is newest overall
 kotlin = "2.4.21"
 compose-multiplatform = "1.12.2"
 filament = "1.81.0"
+maplibre-compose = "0.20.0"   # newest; publishes android + js (no wasm yet), built against Kotlin 2.4.20 / CMP 1.12.1
 androidx-activity = "1.13.0"
 androidx-lifecycle = "2.11.0"
 kotlinx-serialization = "1.13.0"
+kotlinx-coroutines = "1.11.0"
 
 [libraries]
 filament-android = { module = "com.google.android.filament:filament-android", version.ref = "filament" }
 gltfio-android = { module = "com.google.android.filament:gltfio-android", version.ref = "filament" }
+maplibre-compose = { module = "org.maplibre.compose:maplibre-compose", version.ref = "maplibre-compose" }
 compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "compose-multiplatform" }
 compose-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "compose-multiplatform" }
 compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "compose-multiplatform" }
+compose-components-resources = { module = "org.jetbrains.compose.components:components-resources", version.ref = "compose-multiplatform" }
 lifecycle-runtime-compose = { module = "org.jetbrains.androidx.lifecycle:lifecycle-runtime-compose", version.ref = "androidx-lifecycle" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
 
 [plugins]

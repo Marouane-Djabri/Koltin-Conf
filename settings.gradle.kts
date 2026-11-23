@@ -12,4 +12,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "FilamentIso"
-include(":shared", ":androidApp")
+include(":shared", ":androidApp", ":webApp")

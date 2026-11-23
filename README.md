@@ -1,12 +1,57 @@
-# FilamentIso
+# FilamentIso World
 
-A small Kotlin Multiplatform + Compose Multiplatform test of how [Google Filament](https://github.com/google/filament)
-fits into KMP. It renders `isoroom.glb` in a true isometric, orthographic view on Android,
-with drag-to-rotate and pinch-to-zoom.
+A cute, real-world map with a 3D isometric world on top, built with **Kotlin Multiplatform** for
+**Android** and the **Web**. The map, search, data and game logic are shared Kotlin; the 3D layer is
+rendered by **Filament** on Android and **three.js** on the Web. Users will search for a place, fly
+there and build their home; tapping a home opens its interior in the Filament room editor.
+
+> Kotlin Multiplatform Contest entry. Work in progress: see the feature list below.
+
+<!-- Screenshots / GIF: map (Android + Web), landmarks, build flow, interior -->
+_Screenshots coming soon._
+
+## Features
+
+| | Status |
+|---|---|
+| Pastel real-world map (MapLibre Compose + OpenFreeMap), pan / zoom / rotate / tilt, my location | ✅ |
+| 3D world overlay glued to the map (Filament / three.js) | ⏳ |
+| Tap a building → info sheet | ⏳ |
+| Real landmarks from OpenStreetMap (Overpass) | ⏳ |
+| Search and fly (Photon, Nominatim fallback) | ⏳ |
+| Build your home | ⏳ |
+| Enter a home → interior (Filament basement editor) | ⏳ |
+
+## Run it
+
+Requirements: JDK 17+ (`JAVA_HOME`), Android SDK for the Android app. The Web app needs only the
+JDK (Gradle downloads Node.js and the npm packages itself).
+
+```powershell
+# Web (opens http://localhost:8080)
+.\gradlew.bat :webApp:jsBrowserDevelopmentRun
+# Web, optimized static build in webApp\build\dist\js\productionExecutable
+.\gradlew.bat :webApp:jsBrowserDistribution
+
+# Android (phone connected with USB debugging)
+.\gradlew.bat :androidApp:installDebug
+
+# Shared unit tests (commonTest on the JVM)
+.\gradlew.bat :shared:testAndroidHostTest
+```
+
+On macOS/Linux use `./gradlew` instead of `.\gradlew.bat`.
+
+The app opens on Algiers. Drag to pan, pinch or scroll to zoom, two-finger rotate / tilt
+(Ctrl or right-drag on the Web). **N** faces north, **◎** flies to your location, **⌂** goes
+back to Algiers, and **My twins** opens the basement editor.
+
+## Versions
 
 | | Version |
 |---|---|
 | Filament (`filament-android`, `gltfio-android`) | 1.81.0 |
+| MapLibre Compose | 0.20.0 (Kotlin/JS on the Web: no Wasm artifact yet) |
 | Kotlin | 2.4.21 |
 | Compose Multiplatform | 1.12.2 |
 | Android Gradle Plugin | 9.1.1 (see below) |
@@ -176,3 +221,17 @@ The realistic way to use Filament with KMP: share the scene description, camera 
 handling, state and UI in common code (what this repo does), and write a thin `actual` renderer
 for each platform against that platform's native Filament binding. Expect the Android `actual`
 to be easy and every other target to need native build work first.
+
+## Credits
+
+- Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), available under the
+  Open Database License (ODbL).
+- Vector tiles and fonts: [OpenFreeMap](https://openfreemap.org) (OpenMapTiles schema). The pastel style
+  (`tools/pastel-style.mjs`) uses its "liberty" style as a reference.
+- Map rendering: [MapLibre](https://maplibre.org) through [MapLibre Compose](https://github.com/maplibre/maplibre-compose).
+- 3D rendering: [Filament](https://github.com/google/filament) (Android) and [three.js](https://threejs.org) (Web).
+- Search: [Photon](https://photon.komoot.io) by komoot and [Nominatim](https://nominatim.org).
+
+## License
+
+[Apache License 2.0](LICENSE).

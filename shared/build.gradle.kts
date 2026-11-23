@@ -12,15 +12,26 @@ kotlin {
         compileSdk = 37
         minSdk = 24
         withHostTest { }   // runs commonTest on the JVM: ./gradlew :shared:testAndroidHostTest
+        androidResources { enable = true } // ships composeResources (map style) in the APK
+    }
+
+    // Kotlin/JS (not Wasm): MapLibre Compose has no Wasm artifact yet.
+    js(IR) {
+        browser {
+            testTask { enabled = false } // commonTest runs on the JVM (testAndroidHostTest); no headless browser needed
+        }
     }
 
     sourceSets {
         commonMain.dependencies {
-            // Pure Kotlin + Compose UI only. No Filament here.
+            // Pure Kotlin + Compose + MapLibre Compose. No Filament or three.js here.
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(libs.compose.ui)
+            implementation(libs.compose.components.resources)
+            implementation(libs.maplibre.compose)
             implementation(libs.kotlinx.serialization.json)
+            implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
@@ -32,4 +43,9 @@ kotlin {
             implementation(libs.androidx.activity.compose)
         }
     }
+}
+
+compose.resources {
+    publicResClass = false
+    packageOfResClass = "dev.filamentiso.resources"
 }

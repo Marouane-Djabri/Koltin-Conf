@@ -41,9 +41,10 @@ import dev.filamentiso.storage.Templates
 import dev.filamentiso.ui.EditorScreen
 import dev.filamentiso.ui.Pill
 import dev.filamentiso.ui.Ui
+import dev.filamentiso.world.ui.MapScreen
 
 /**
- * Shared app: house list → editor, plus the original isoroom.glb viewer.
+ * Shared app: world map → house list → editor, plus the original isoroom.glb viewer.
  * [extraCatalog] (e.g. Blender models listed in assets/furniture/catalog.json) is merged
  * over the built-in placeholders; an entry with the same id replaces the built-in one.
  */
@@ -51,14 +52,15 @@ import dev.filamentiso.ui.Ui
 fun App(store: HouseStore, extraCatalog: List<CatalogItem> = emptyList()) {
     val catalog = remember(extraCatalog) { Catalog(extraCatalog + BuiltinCatalog.items) }
     var houses by remember { mutableStateOf(store.list()) }
-    // "home", "demo" or "edit:<houseId>" — a String so it survives rotation.
-    var screen by rememberSaveable { mutableStateOf("home") }
+    // "map", "home", "demo" or "edit:<houseId>" — a String so it survives rotation.
+    var screen by rememberSaveable { mutableStateOf("map") }
 
     fun refresh() { houses = store.list() }
 
-    PlatformBackHandler(enabled = screen != "home") { refresh(); screen = "home" }
+    PlatformBackHandler(enabled = screen != "map") { refresh(); screen = if (screen == "home") "map" else "home" }
 
     when {
+        screen == "map" -> MapScreen(onOpenTwins = { refresh(); screen = "home" })
         screen == "demo" -> DemoScreen(onBack = { screen = "home" })
         screen.startsWith("edit:") -> {
             val id = screen.removePrefix("edit:")
@@ -80,6 +82,7 @@ fun App(store: HouseStore, extraCatalog: List<CatalogItem> = emptyList()) {
             },
             onDelete = { store.delete(it.id); refresh() },
             onDemo = { screen = "demo" },
+            onMap = { screen = "map" },
         )
     }
 }
@@ -92,6 +95,7 @@ private fun HomeScreen(
     onNewSample: () -> Unit,
     onDelete: (House) -> Unit,
     onDemo: () -> Unit,
+    onMap: () -> Unit,
 ) {
     var confirmDelete by remember { mutableStateOf<String?>(null) }
     Column(
@@ -99,6 +103,7 @@ private fun HomeScreen(
             .verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        Pill("‹ Map", onClick = onMap)
         BasicText("Digital twins", style = Ui.title)
         BasicText("Create an isometric twin of your basement: draw rooms, add doors and windows, furnish it.", style = Ui.small)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
