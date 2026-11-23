@@ -32,6 +32,20 @@ import dev.filamentiso.world.WorldController
 import dev.filamentiso.world.model.Building
 import dev.filamentiso.world.model.ModelTransform
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import dev.filamentiso.geometry.SampleFiles
+import dev.filamentiso.glb.GlbLimits
+import dev.filamentiso.resources.Res
+import dev.filamentiso.world.platform.glbPickerType
+import io.github.vinceglb.filekit.dialogs.compose.rememberFilePickerLauncher
+import io.github.vinceglb.filekit.name
+import io.github.vinceglb.filekit.readBytes
+import io.github.vinceglb.filekit.size
 
 /** Floating rounded card used for bottom panels. */
 @Composable
@@ -49,14 +63,38 @@ fun MapCard(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
 
 /** Placement: the building follows the map centre; choose a model, scale and rotate it. */
 @Composable
-fun PlacementPanel(world: WorldController, b: Building, onDone: () -> Unit, extraActions: @Composable () -> Unit = {}) {
+fun PlacementPanel(world: WorldController, b: Building, onDone: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var showSamples by remember { mutableStateOf(false) }
+    // System picker: Android document picker, <input type="file"> on the Web (FileKit).
+    val picker = rememberFilePickerLauncher(type = glbPickerType) { file ->
+        if (file == null) return@rememberFilePickerLauncher
+        scope.launch {
+            val size = runCatching { file.size() }.getOrNull()
+            if (size != null && size > GlbLimits.Building.maxBytes) world.rejectTooBig(size)
+            else world.importModel(file.name, file.readBytes())
+        }
+    }
     MapCard {
-        BasicText("Drag the map to move your building", style = MapUi.bodyStrong)
+        BasicText(if (world.importing) "Importing…" else "Drag the map to move your building", style = MapUi.bodyStrong)
+        b.asset?.let { BasicText("${it.fileName} · ${it.triangleCount} triangles · ${it.sizeBytes / 1024} KB", style = MapUi.small) }
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            MapChip("Import .glb…", primary = b.asset != null) { picker.launch() }
+            MapChip(if (showSamples) "Samples ▴" else "Try a sample ▾") { showSamples = !showSamples }
             for (k in SampleBuildings.Kind.entries) {
-                MapChip(k.title, primary = b.asset == null && b.placeholderKind == k) { world.setKind(k) }
+                MapChip(k.title, primary = b.asset == null && b.placeholderKind == k) { scope.launch { world.setKind(k) } }
             }
-            extraActions()
+        }
+        if (showSamples) {
+            BasicText("Sample .glb files bundled with the app, imported like your own:", style = MapUi.small)
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (s in SampleFiles.buildings) {
+                    MapChip(s.fileName) {
+                        showSamples = false
+                        scope.launch { world.importModel(s.fileName, Res.readBytes(SampleFiles.resourcePath(s.fileName))) }
+                    }
+                }
+            }
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             BasicText("Size", style = MapUi.small)
@@ -71,7 +109,7 @@ fun PlacementPanel(world: WorldController, b: Building, onDone: () -> Unit, extr
             BasicText("${b.transform.rotationDeg.toInt()}°", style = MapUi.body)
             MapChip("+15°") { world.rotate(ModelTransform.ROTATION_STEP) }
             Box(Modifier.weight(1f))
-            MapChip("Cancel") { world.cancelPlacing() }
+            MapChip("Cancel") { scope.launch { world.cancelPlacing() } }
             MapChip("Done", primary = true, onClick = onDone)
         }
     }

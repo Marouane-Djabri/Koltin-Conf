@@ -12,6 +12,14 @@ import dev.filamentiso.world.geo.LatLng
 import dev.filamentiso.world.model.Building
 import dev.filamentiso.world.model.LOCAL_USER
 import dev.filamentiso.world.model.ModelTransform
+import dev.filamentiso.world.model.ModelAsset
+import dev.filamentiso.world.model.ModelRef
+import dev.filamentiso.glb.GlbCheck
+import dev.filamentiso.glb.GlbLimits
+import dev.filamentiso.glb.GlbProblem
+import dev.filamentiso.glb.GlbValidator
+import dev.filamentiso.glb.Normalization
+import dev.filamentiso.storage.StorageException
 import dev.filamentiso.world.overlay.ModelProvider
 import dev.filamentiso.world.overlay.ResolvedModel
 import dev.filamentiso.world.overlay.ScreenEntity
@@ -91,15 +99,72 @@ class WorldController(
     fun moveTo(p: LatLng) = updatePlacing { it.copy(position = p) }
     fun setScale(s: Float) = updatePlacing { it.copy(transform = it.transform.withScale(s)) }
     fun rotate(deg: Float) = updatePlacing { it.copy(transform = it.transform.rotatedBy(deg)) }
-    fun setKind(kind: SampleBuildings.Kind) = updatePlacing { it.copy(placeholderKind = kind, asset = null, name = "My ${kind.title.lowercase()}") }
+    suspend fun setKind(kind: SampleBuildings.Kind) {
+        val old = placing?.asset
+        updatePlacing { it.copy(placeholderKind = kind, asset = null, name = "My ${kind.title.lowercase()}") }
+        old?.let { dropIfOrphan(it) }
+    }
 
-    fun cancelPlacing() { placing = null }
+    suspend fun cancelPlacing() {
+        val b = placing ?: return
+        placing = null
+        b.asset?.let { dropIfOrphan(it) }
+    }
 
     suspend fun finishPlacing() {
         val b = placing ?: return
         save(b)
         placing = null
         selectedId = b.id
+    }
+
+    // ---------------------------------------------------------------- import
+
+    /** True while a file is being read / validated / stored. */
+    var importing by mutableStateOf(false); private set
+
+    /**
+     * The whole import pipeline, shared by both platforms: validate → store → use as the model of the
+     * building being placed. Problems end up in [message] with a user-friendly text.
+     */
+    suspend fun importModel(fileName: String, bytes: ByteArray) {
+        val target = placing ?: return
+        importing = true
+        try {
+            val info = when (val check = GlbValidator.validate(fileName, bytes, GlbLimits.Building)) {
+                is GlbCheck.Invalid -> { message = check.message; return }
+                is GlbCheck.Valid -> check.info
+            }
+            val id = newId("a_")
+            val path = assets.save(id, bytes)
+            val asset = ModelAsset(id, LOCAL_USER, fileName, info.sizeBytes, info.triangleCount, info.bboxMin, info.bboxMax, path)
+            val ref = ModelRef.Asset(id)
+            models.remember(ref.key, models.resolveBytes(ref.key, bytes, asset))
+            val old = target.asset
+            updatePlacing {
+                it.copy(asset = asset, placeholderKind = null, name = fileName.substringBeforeLast('.'), transform = ModelTransform())
+            }
+            old?.let { dropIfOrphan(it) }
+            message = "Imported ${asset.fileName}: ${info.triangleCount} triangles, fitted to ${Normalization.HOME_FOOTPRINT_M.toInt()} m."
+        } catch (e: StorageException) {
+            message = e.message
+        } catch (e: Exception) {
+            message = "Could not import this file (${e.message ?: "unknown error"})."
+        } finally {
+            importing = false
+        }
+    }
+
+    /** Called by the UI when the picker's file is bigger than the limit, before reading it all. */
+    fun rejectTooBig(size: Long) {
+        message = GlbProblem.TooBig(size, GlbLimits.Building.maxBytes).message
+    }
+
+    /** Deletes an imported file nobody uses anymore (placement cancelled or replaced). */
+    private suspend fun dropIfOrphan(a: ModelAsset) {
+        if (buildings.any { it.asset?.id == a.id } || placing?.asset?.id == a.id) return
+        runCatching { assets.delete(a.storagePath) }
+        models.forget(ModelRef.Asset(a.id))
     }
 
     suspend fun save(b: Building) {
