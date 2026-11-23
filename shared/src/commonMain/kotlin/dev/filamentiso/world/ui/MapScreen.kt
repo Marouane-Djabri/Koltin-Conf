@@ -43,6 +43,8 @@ import dev.filamentiso.world.model.Building
 import dev.filamentiso.world.overlay.OverlayProjector
 import dev.filamentiso.world.overlay.ScreenPoint
 import dev.filamentiso.world.platform.rememberMyLocation
+import dev.filamentiso.world.platform.rememberOnline
+import dev.filamentiso.world.platform.OFFLINE_MESSAGE
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.launch
 import org.maplibre.compose.camera.CameraAnimation
@@ -170,6 +172,8 @@ fun MapScreen(world: WorldController, onOpenTwins: () -> Unit) {
 private fun MapHud(mapState: MapState, world: WorldController, onOpenTwins: () -> Unit) {
     val scope = rememberCoroutineScope()
     val myLocation = rememberMyLocation()
+    val online = rememberOnline()
+    LaunchedEffect(online) { if (!online) world.message = OFFLINE_MESSAGE }
     val uriHandler = LocalUriHandler.current
 
     fun flyTo(target: LatLng, zoom: Double = 17.0) = scope.launch {

@@ -1,13 +1,16 @@
 # FilamentIso World
 
 A cute, real-world map with a 3D isometric world on top, built with **Kotlin Multiplatform** for
-**Android** and the **Web**. The map, search, data and game logic are shared Kotlin; the 3D layer is
-rendered by **Filament** on Android and **three.js** on the Web. Users will search for a place, fly
-there and build their home; tapping a home opens its interior in the Filament room editor.
+**Android** and the **Web**. Map, data, state, math, validation and editing logic are shared Kotlin;
+only rendering, file picking and file storage are platform code. The 3D layer is rendered by
+**Filament** on Android and **three.js** on the Web, from the same shared scene description.
+
+Build a home on the map (or import your own `.glb`), tap it to fly into an isometric diorama, then
+step inside and furnish it floor by floor.
 
 > Kotlin Multiplatform Contest entry. Work in progress: see the feature list below.
 
-<!-- Screenshots / GIF: map (Android + Web), landmarks, build flow, interior -->
+<!-- Screenshots / GIF: map (Android + Web), build flow, iso view, interior -->
 _Screenshots coming soon._
 
 ## Features
@@ -15,12 +18,15 @@ _Screenshots coming soon._
 | | Status |
 |---|---|
 | Pastel real-world map (MapLibre Compose + OpenFreeMap), pan / zoom / rotate / tilt, my location | ✅ |
-| 3D world overlay glued to the map (Filament / three.js) | ⏳ |
-| Tap a building → info sheet | ⏳ |
-| Real landmarks from OpenStreetMap (Overpass) | ⏳ |
-| Search and fly (Photon, Nominatim fallback) | ⏳ |
-| Build your home | ⏳ |
-| Enter a home → interior (Filament basement editor) | ⏳ |
+| 3D buildings glued to the map (Filament on Android, three.js on the Web) | ✅ |
+| Build here: 4 cute built-in buildings, size slider, 15° rotation, move by dragging the map | ✅ |
+| Import your own `.glb` (validated in shared code, auto-fitted, stored on the device) | ✅ |
+| Tap a building → info sheet → **Enter** → animated zoom into an isometric view | ✅ |
+| Interior editor: up to 5 floors, paint, walls / doors / windows, furniture, zones, undo | ✅ |
+| Import a `.glb` as furniture | ✅ |
+| Demo street with a furnished cottage on first launch, sample `.glb` files to try | ✅ |
+| Real landmarks from OpenStreetMap (Overpass), search and fly | ⏳ |
+| Avatars and real-time presence | ⏳ |
 
 ## Run it
 
@@ -42,9 +48,124 @@ JDK (Gradle downloads Node.js and the npm packages itself).
 
 On macOS/Linux use `./gradlew` instead of `.\gradlew.bat`.
 
-The app opens on Algiers. Drag to pan, pinch or scroll to zoom, two-finger rotate / tilt
-(Ctrl or right-drag on the Web). **N** faces north, **◎** flies to your location, **⌂** goes
-back to Algiers, and **My twins** opens the basement editor.
+The app opens on a small demo street in Algiers. Drag to pan, pinch or scroll to zoom, two-finger
+rotate / tilt (Ctrl or right-drag on the Web). **N** faces north, **◎** flies to your location,
+**⌂** goes back to the demo street, and **My twins** opens the original basement editor.
+
+## Using the world
+
+### Build and import
+
+1. Tap **+ Build here**. A building appears at the centre of the map; **drag the map** to move it.
+2. Pick a built-in model (cottage, mosque, apartment block, café), or **Import .glb…**, or
+   **Try a sample ▾** to import one of the bundled sample files through the same pipeline.
+3. Adjust **Size** (25–300 %) and turn in **15°** steps, then **Done**. Everything is saved on the
+   device (Android app storage, browser IndexedDB). No account, no network needed.
+
+Zoomed out (below zoom 16) buildings show as round bubbles; zoomed in, the full 3D models load
+(at most 15 at once, nearest to the centre first). Tap a building for its sheet: **Enter**, **Move**, **Delete**.
+
+### Supported files and limits
+
+| | Building | Furniture |
+|---|---|---|
+| Format | glTF 2.0 **binary** (`.glb`), self-contained | same |
+| Max file size | 15 MB | 5 MB |
+| Max triangles (estimated from accessors, per instance) | 50 000 | 15 000 |
+| Max texture size (read from embedded PNG/JPEG headers) | 2048 px | 2048 px |
+| Max materials | 8 | 8 |
+
+Refused with a clear message: `.gltf` text files ("export as .glb"), files that aren't glTF,
+glTF 1.0, damaged files (bad header, chunk lengths, JSON, buffer ranges, node cycles), external
+buffers or images, **Draco / meshopt compression** ("please re-export without compression"), other
+required extensions that both renderers can't handle, and running out of storage. Going offline
+shows a notice: only the map tiles need the network.
+
+Compression is refused on purpose: three.js would need hosted Draco/meshopt decoders, and the two
+platforms could then behave differently. All limits are constants in `glb/GlbValidator.kt`.
+
+The file is never modified. Its bounding box (from accessor min/max, with node transforms) is used
+to centre it, put its base on the ground and scale its largest side to 20 m. Size, rotation and
+position are stored next to it as data (`ModelTransform`).
+
+### Isometric view and interior
+
+- **Enter ›** on a building's sheet: the map camera flies to it while a pastel backdrop fades in,
+  then the building appears on a ground disc in a true isometric view (800 ms, eased).
+- **◀ Turn / Turn ▶** or a swipe orbits in 90° steps; pinch or **+ / −** zooms. Pinching far out,
+  **‹ Map** or the Android back button plays the animation in reverse and puts the map camera back
+  where it was.
+- **Enter ›** again goes inside. An imported GLB is only a shell, so the interior is our own grid,
+  sized from the shell's footprint (0.5 m tiles, 4–40 m). The shell is hidden while inside, on both
+  platforms: Filament can't switch opaque materials to see-through at runtime.
+- **Floors:** the stack on the left. **+** adds a floor (up to 5, 3 m apart) and **−** removes the
+  top one. Lower floors are drawn underneath the current one.
+- **Tools:**
+  - **Select:** tap an item, then Rotate, Color, Delete, or give it a **zone** (Working, Relaxing,
+    Eating, Sleeping, Meeting) for the avatars to come.
+  - **Furniture:** pick an item, then tap or drag. The preview is green when it fits and red when
+    it doesn't (outside a room, overlapping, or crossing a wall).
+  - **Paint:** wood, tile, carpet, concrete or terrazzo; tap or drag.
+  - **Wall:** tap a tile edge to add or remove a wall; drag for long walls.
+  - **Door**, **Window**, **Room** and **Erase**.
+  - Also **Undo / Redo**, a ⟳ 90° view turn, Plan view and low walls.
+- **Furniture catalog:** couch, armchair, TV, rug, lamp, plant, bed, table, chair, desk, bookshelf,
+  kitchen counter, coffee machine, fridge and more, each with a footprint and 4 rotations.
+  **Import** a `.glb` (or the sample `armchair.glb` / `potted_plant.glb`) as furniture: choose its
+  footprint first, and the model is fitted to it.
+
+### Sample models
+
+All sample models are generated from our own Kotlin code, so there are no licensing questions.
+[`tools/generate_samples`](tools/generate_samples/README.md) writes them into
+`shared/src/commonMain/composeResources/files/samples/`:
+
+- `cottage.glb`, `mosque.glb`, `apartment.glb`, `cafe.glb`
+- `armchair.glb`, `potted_plant.glb`
+
+Each is 5–66 KB, Y-up, in metres, with no compression. A test fails if the committed files are stale
+and runs every one through our validator. The same code draws the built-in buildings on the map.
+
+## Architecture
+
+```
+                         commonMain (shared Kotlin, Compose)
+ ┌──────────────────────────────────────────────────────────────────────────────┐
+ │ MapLibre Compose map + HUD        WorldController: buildings, placement,     │
+ │   │ camera, projection              import (GlbValidator, Normalization),    │
+ │   ▼                                 ViewModeMachine (map ↔ iso transitions)   │
+ │ OverlayProjector: pixel-space       │                                        │
+ │ camera, per-building Mat4,          ├─► IsoStage: diorama + iso camera       │
+ │ tap hit-testing                     └─► InteriorController: floors →         │
+ │   │                                     EditorController (edits, undo, pick) │
+ │   ▼                                                                          │
+ │ SceneContent (glTF bytes + matrices) + IsoSceneConfig (camera, light, clear) │
+ │ AssetStore / BuildingRepository on top of a BlobStore interface              │
+ └──────────┬──────────────────────────────────────────────┬────────────────────┘
+            │ expect: IsoSceneView, BlobStore, file picker  │
+ androidMain ▼                                       jsMain ▼
+ Filament + gltfio on a translucent              three.js + GLTFLoader, offscreen,
+ TextureView (touches pass to the map)           frame drawn by Compose
+ FileBlobStore (app files dir)                   IndexedDbBlobStore
+ FileKit: system document picker                 FileKit: <input type="file">
+```
+
+Renderers know nothing about maps, buildings or editing. They draw a list of glTF models with the
+matrices and camera that shared code computed. That's why both platforms show the same thing for
+the same state, and why all the logic is unit-tested on the JVM.
+
+### Platform notes and fallbacks
+
+- **Web 3D is drawn offscreen.** Compose for Web draws everything, MapLibre included, into one
+  canvas, and HTML elements can only sit *above* it, where they would cover the HUD. So three.js
+  renders into a hidden canvas, and Compose draws its pixels like an image (at most 1.5 px per
+  CSS px). This keeps the same layering as Android. The cost is a pixel read-back for each frame
+  that changes.
+- **Android 3D is a translucent `TextureView`** above the MapLibre surface. Compose shares pointer
+  events between overlapping interop views, so when the overlay ignores touches, the map gets them.
+- **The Android picker shows all files.** Most document providers don't know the
+  `model/gltf-binary` MIME type and would hide every `.glb`. The validator rejects anything else.
+- **The shell is hidden inside** instead of shown at 15 % opacity, the same on both platforms (see above).
 
 ## Versions
 
@@ -156,15 +277,27 @@ shared/                      KMP module (com.android.kotlin.multiplatform.librar
     model/                   House, Level, Edge, Room, FurnitureItem, Catalog, built-in furniture
     editor/                  pure edit functions, undo History, EditorController (tools → edits)
     geometry/                MeshBuilder, ShellBuilder, OverlayBuilder, GlbWriter
-    storage/                 HouseStore interface, JSON, templates
-    App.kt, ui/              home screen, editor UI, isoroom demo
-  src/commonTest/            31 tests: camera, picking, edits, undo, placement rules, cutaway, GLB
+    geometry/SampleBuildings procedural cottage / mosque / apartment / café (+ SampleFiles)
+    glb/                     GlbValidator (header, chunks, limits, extensions), Normalization
+    storage/                 HouseStore; BlobStore, AssetStore, BuildingRepository (WorldStorage.kt)
+    world/                   WorldController, ViewMode state machine, IsoStage, InteriorController,
+                             DemoContent; model/ (Building, ModelAsset, ModelTransform),
+                             overlay/ (OverlayProjector, ModelProvider), ui/ (map, panels, HUDs)
+    App.kt, ui/              home screen, basement editor UI, isoroom demo
+  src/commonTest/            77 tests: GLB validation, normalization, overlay math, view modes,
+                             import flow, interior edits, collisions, floors, serialization, editor
   src/androidMain/           Android-only
-    IsoSceneView.android.kt  `actual`: AndroidView + SurfaceView raw gestures + lifecycle observer
+    IsoSceneView.android.kt  `actual`: AndroidView + TextureView raw gestures + lifecycle observer
     FilamentIsoRenderer.kt   Engine/Renderer/Scene/View/Camera, UiHelper + DisplayHelper,
                              Choreographer loop, multi-model gltfio diffing, lights, teardown
+    storage/FileBlobStore.kt app files dir; world/platform/ picker type, online state, location
     AndroidPlatform.kt       FileHouseStore, asset catalog loader
+  src/jsMain/                Web-only: ThreeRenderer + IsoSceneView.js.kt (three.js 0.187),
+                             IndexedDbBlobStore, picker type, online state, location
+  src/androidHostTest/       SampleFilesTest (keeps the bundled samples in sync), GlbDumpTest
 androidApp/                  thin com.android.application module: MainActivity + assets/isoroom.glb
+webApp/                      ComposeViewport entry point; webpack.config.d/three.js (ESM resolve)
+tools/                       pastel-style.mjs (map style), generate_samples/ (sample .glb files)
 ```
 
 AGP 9 no longer allows `com.android.application` and `kotlin.multiplatform` in the same module,
@@ -172,7 +305,7 @@ which is why the app shell lives in its own module.
 
 **commonMain** decides *what* to show: camera math, config, UI state and gestures expressed as
 config changes. **androidMain** decides *how*: Filament objects, the surface and the frame loop.
-Gestures go up from the SurfaceView as new `IsoSceneConfig` values. State is hoisted in common
+Gestures go up from the TextureView as new `IsoSceneConfig` values. State is hoisted in common
 code and flows back down.
 
 ### Rendering details
@@ -230,7 +363,7 @@ to be easy and every other target to need native build work first.
   (`tools/pastel-style.mjs`) uses its "liberty" style as a reference.
 - Map rendering: [MapLibre](https://maplibre.org) through [MapLibre Compose](https://github.com/maplibre/maplibre-compose).
 - 3D rendering: [Filament](https://github.com/google/filament) (Android) and [three.js](https://threejs.org) (Web).
-- Search: [Photon](https://photon.komoot.io) by komoot and [Nominatim](https://nominatim.org).
+- File picking: [FileKit](https://github.com/vinceglb/FileKit) (Android + Web).
 
 ## License
 

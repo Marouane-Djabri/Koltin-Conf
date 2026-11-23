@@ -63,6 +63,12 @@ class InteriorController(
             return cells(widthM) to cells(depthM)
         }
 
+        /** Interior grid for a building: its placed shell's footprint in cells. */
+        fun footprintCellsOf(b: Building, model: dev.filamentiso.world.overlay.ResolvedModel): Pair<Int, Int> {
+            val box = IsoStage.bounds(IsoStage.buildingMatrix(b, model), model.bboxMin, model.bboxMax)
+            return plotCells(box.halfExtent.x * 2, box.halfExtent.z * 2)
+        }
+
         /** A new floor: one room filling the plot, walls all around, and a front door on the ground floor. */
         fun newFloor(index: Int, w: Int, d: Int): Level {
             var l = Level(plotWidth = w, plotDepth = d, wallHeight = 2.6f)
@@ -93,11 +99,8 @@ class InteriorController(
     val canAddFloor get() = floorCount < MAX_FLOORS
     val canRemoveFloor get() = floorCount > 1
 
-    private fun footprintCells(): Pair<Int, Int> {
-        val model = world.resolvedModel(building) ?: return 20 to 20
-        val b = IsoStage.bounds(IsoStage.buildingMatrix(building, model), model.bboxMin, model.bboxMax)
-        return plotCells(b.halfExtent.x * 2, b.halfExtent.z * 2)
-    }
+    private fun footprintCells(): Pair<Int, Int> =
+        world.resolvedModel(building)?.let { footprintCellsOf(building, it) } ?: (20 to 20)
 
     fun selectFloor(i: Int) {
         if (i !in building.floors.indices || i == floorIndex) return

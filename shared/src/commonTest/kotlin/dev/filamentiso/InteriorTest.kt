@@ -144,3 +144,16 @@ class InteriorTest {
         assertEquals(4, world.buildings.single().floors.size, "saved")
     }
 }
+
+class DemoContentTest {
+    @Test
+    fun demoCottageIsFullyFurnished() {
+        val home = DemoContent.buildings().first { it.id == DemoContent.DEMO_HOME_ID }
+        assertEquals(2, home.floors.size)
+        // placeFurniture silently skips items that don't fit: every demo item must have made it.
+        assertEquals(16, home.floors[0].furniture.size, "ground floor items")
+        assertEquals(6, home.floors[1].furniture.size, "upstairs items")
+        assertTrue(home.floors[0].furniture.any { it.status == Status.WORKING })
+        assertTrue(home.floors[0].tiles.isNotEmpty())
+    }
+}
