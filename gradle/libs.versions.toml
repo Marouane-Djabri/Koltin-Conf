@@ -5,6 +5,7 @@ kotlin = "2.4.21"
 compose-multiplatform = "1.12.2"
 filament = "1.81.0"
 maplibre-compose = "0.20.0"   # newest; publishes android + js (no wasm yet), built against Kotlin 2.4.20 / CMP 1.12.1
+maplibre-native-ffi = "0.202610.0" # native engine that maplibre-compose 0.20.0 is built against; the app must pick a runtime (OpenGL here)
 androidx-activity = "1.13.0"
 androidx-lifecycle = "2.11.0"
 kotlinx-serialization = "1.13.0"
@@ -14,6 +15,7 @@ kotlinx-coroutines = "1.11.0"
 filament-android = { module = "com.google.android.filament:filament-android", version.ref = "filament" }
 gltfio-android = { module = "com.google.android.filament:gltfio-android", version.ref = "filament" }
 maplibre-compose = { module = "org.maplibre.compose:maplibre-compose", version.ref = "maplibre-compose" }
+maplibre-native-runtime-opengl-android = { module = "org.maplibre.nativeffi:maplibre-native-ffi-runtime-opengl-android", version.ref = "maplibre-native-ffi" }
 compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "compose-multiplatform" }
 compose-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "compose-multiplatform" }
 compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "compose-multiplatform" }

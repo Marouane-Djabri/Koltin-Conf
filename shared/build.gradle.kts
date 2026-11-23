@@ -37,6 +37,7 @@ kotlin {
             implementation(libs.kotlin.test)
         }
         androidMain.dependencies {
+            implementation(libs.maplibre.native.runtime.opengl.android) // the native map engine (libmaplibre-native-c.so)
             implementation(libs.filament.android)
             implementation(libs.gltfio.android)
             implementation(libs.lifecycle.runtime.compose)
