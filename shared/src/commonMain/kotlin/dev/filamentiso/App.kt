@@ -47,6 +47,7 @@ import dev.filamentiso.world.DemoContent
 import dev.filamentiso.storage.BlobStore
 import dev.filamentiso.storage.BlobAssetStore
 import dev.filamentiso.storage.BlobBuildingRepository
+import dev.filamentiso.storage.BlobPlotRepository
 
 /**
  * Shared app: world map → house list → editor, plus the original isoroom.glb viewer.
@@ -55,7 +56,7 @@ import dev.filamentiso.storage.BlobBuildingRepository
  */
 @Composable
 fun App(store: HouseStore, blobs: BlobStore, extraCatalog: List<CatalogItem> = emptyList()) {
-    val world = remember(blobs) { WorldController(BlobBuildingRepository(blobs), BlobAssetStore(blobs), DemoContent.firstRunFlag(blobs)) }
+    val world = remember(blobs) { WorldController(BlobBuildingRepository(blobs), BlobAssetStore(blobs), DemoContent.firstRunFlag(blobs), BlobPlotRepository(blobs)) }
     val catalog = remember(extraCatalog) { Catalog(extraCatalog + BuiltinCatalog.items) }
     var houses by remember { mutableStateOf(store.list()) }
     // "map", "home", "demo" or "edit:<houseId>" — a String so it survives rotation.

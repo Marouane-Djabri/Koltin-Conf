@@ -34,6 +34,7 @@ import dev.filamentiso.world.WorldController
 import dev.filamentiso.world.ViewMode
 import dev.filamentiso.world.IsoSub
 import dev.filamentiso.world.InteriorController
+import dev.filamentiso.world.scene.SceneController
 import dev.filamentiso.PlatformBackHandler
 import androidx.compose.runtime.withFrameNanos
 import dev.filamentiso.world.geo.LatLng
@@ -90,26 +91,37 @@ fun MapScreen(world: WorldController, onOpenTwins: () -> Unit) {
         val center = mapState.centerLatLng()
         if (center != placing.position) world.moveTo(center)
     }
+    val claiming = world.claiming
+    if (claiming != null) {
+        val center = mapState.centerLatLng()
+        if (center != claiming.anchor) world.moveClaim(center)
+    }
+    val shownPlots = world.plots.filter { it.id != claiming?.id } + listOfNotNull(claiming)
+    val outlines = view?.let { plotOutlines(it, shownPlots) } ?: emptyList()
     val shown = world.buildings.filter { it.id != placing?.id } + listOfNotNull(placing)
     val entities = view?.let { placeEntities(world, it, shown) } ?: emptyList()
     LaunchedEffect(shown.mapNotNull { it.asset?.id }.toSet()) { world.loadMissing(shown) }
 
+    val currentOutlines = remember { PlotOutlineHolder() }
     val interactions = remember(world) {
         MapInteractions(MapInteractions.Standard) {
             callbacks {
                 click {
                     onEvent { e ->
-                        if (world.placing != null) return@onEvent ClickResult.Pass
+                        if (world.placing != null || world.claiming != null) return@onEvent ClickResult.Pass
                         val tap = ScreenPoint(e.screenOffset.x.value * density, e.screenOffset.y.value * density)
                         val hit = OverlayProjector.hitTest(world.lastEntities, tap)
-                        world.selectedId = hit?.id
-                        if (hit != null) ClickResult.Consume else ClickResult.Pass
+                        // A building on a plot wins over the plot under it.
+                        val id = hit?.id ?: currentOutlines.at(tap)
+                        world.selectedId = id
+                        if (id != null) ClickResult.Consume else ClickResult.Pass
                     }
                 }
             }
         }
     }
     world.lastEntities = entities
+    currentOutlines.value = outlines
 
     // ---- Map ↔ iso transition: shared state machine, driven by real frame time.
     val mode = world.viewMode
@@ -129,10 +141,10 @@ fun MapScreen(world: WorldController, onOpenTwins: () -> Unit) {
         val ease = CameraAnimation.Ease(CameraAnimation.Ease.Standard) { duration = 360.milliseconds }
         when (mode) {
             is ViewMode.TransitionToIso -> {
-                val b = world.isoBuilding ?: return@LaunchedEffect
+                val anchor = world.isoAnchor ?: return@LaunchedEffect
                 if (returnCamera == null) returnCamera = mapState.cameraPosition
                 val zoom = maxOf(mapState.cameraPosition.zoom, 18.8)
-                mapState.animateCamera(CameraUpdate(center = b.position.toPosition(), zoom = zoom), ease)
+                mapState.animateCamera(CameraUpdate(center = anchor.toPosition(), zoom = zoom), ease)
             }
             is ViewMode.TransitionToMap -> {
                 returnCamera?.let { mapState.animateCamera(it.toCameraUpdate(), ease) }
@@ -147,7 +159,15 @@ fun MapScreen(world: WorldController, onOpenTwins: () -> Unit) {
     val interiorScope = rememberCoroutineScope()
     val interiorId = (mode as? ViewMode.Iso)?.takeIf { it.sub == IsoSub.INTERIOR }?.buildingId
     val interior = interiorId?.let { id -> remember(id) { InteriorController(world, id, interiorScope) } }
-    val extras = interior?.let { ic -> IsoExtras(ic.sceneContent(), ic.config(), ic.editor::onGesture, ic.editor::setViewport) } ?: IsoExtras()
+    // A plot opens straight into its scene editor, which is also what the transition shows.
+    val sceneEditor = world.isoPlot?.let { p ->
+        remember(p.id) { SceneController(p) { s -> interiorScope.launch { world.savePlot(s) } } }
+    }
+    val extras = when {
+        interior != null -> IsoExtras(interior.sceneContent(), interior.config(), interior.editor::onGesture, interior.editor::setViewport)
+        sceneEditor != null -> IsoExtras(sceneEditor.sceneContent(), sceneEditor.config(), sceneEditor::onGesture, sceneEditor::setViewport)
+        else -> IsoExtras()
+    }
 
     Box(Modifier.fillMaxSize().onSizeChanged { sizePx = it }) {
         MaplibreMap(
@@ -157,12 +177,15 @@ fun MapScreen(world: WorldController, onOpenTwins: () -> Unit) {
             overlay = {}, // our own HUD below, with an always-visible attribution
         )
         if (view != null) {
+            if (mapHudVisible(mode)) PlotAreas(outlines, world.selectedId ?: claiming?.id)
             WorldScene(world, view, entities, extras)
             if (mapHudVisible(mode)) BuildingBubbles(view, shown) { world.selectedId = it.id }
+            if (mapHudVisible(mode) && placing == null && claiming == null) PlotIcons(outlines, view) { world.selectedId = it.id }
         }
         when {
             mapHudVisible(mode) -> MapHud(mapState, world, onOpenTwins)
             interior != null -> InteriorHud(interior, world)
+            sceneEditor != null -> SceneHud(sceneEditor, world)
             else -> IsoHud(world)
         }
     }
@@ -200,8 +223,23 @@ private fun MapHud(mapState: MapState, world: WorldController, onOpenTwins: () -
             world.message?.let { msg -> Toast(msg) { world.message = null } }
             val placing = world.placing
             val selected = world.selected
+            val claiming = world.claiming
+            val plot = world.selectedPlot
             when {
                 placing != null -> PlacementPanel(world, placing, onDone = { scope.launch { world.finishPlacing() } })
+                claiming != null -> ClaimPanel(world, claiming, onDone = { scope.launch { world.finishClaim() } })
+                plot != null -> PlotSheet(
+                    plot,
+                    onEnter = { world.open(plot) },
+                    onMove = {
+                        scope.launch {
+                            mapState.animateCamera(CameraUpdate(center = plot.anchor.toPosition()), CameraAnimation.Fly.Standard)
+                            world.startMovingPlot(plot)
+                        }
+                    },
+                    onDelete = { scope.launch { world.deletePlot(plot) } },
+                    onClose = { world.selectedId = null },
+                )
                 selected != null -> BuildingSheet(
                     selected,
                     onEnter = { world.open(selected) },
@@ -212,10 +250,17 @@ private fun MapHud(mapState: MapState, world: WorldController, onOpenTwins: () -
                     onDelete = { scope.launch { world.delete(selected) } },
                     onClose = { world.selectedId = null },
                 )
-                else -> MapChip("+ Build here", primary = true) {
-                    val z = mapState.cameraPosition.zoom
-                    if (z < WorldController.FULL_MODEL_MIN_ZOOM) flyTo(mapState.centerLatLng(), 17.0)
-                    world.startNewBuilding(mapState.centerLatLng())
+                else -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MapChip("+ Build here", primary = true) {
+                        val z = mapState.cameraPosition.zoom
+                        if (z < WorldController.FULL_MODEL_MIN_ZOOM) flyTo(mapState.centerLatLng(), 17.0)
+                        world.startNewBuilding(mapState.centerLatLng())
+                    }
+                    MapChip("Claim a plot here") {
+                        val z = mapState.cameraPosition.zoom
+                        if (z < WorldController.FULL_MODEL_MIN_ZOOM) flyTo(mapState.centerLatLng(), 17.5)
+                        world.startClaim(mapState.centerLatLng())
+                    }
                 }
             }
         }

@@ -90,7 +90,7 @@ class InteriorController(
     init {
         if (building.floors.isEmpty()) {
             val (w, d) = footprintCells()
-            update(building.copy(floors = listOf(newFloor(0, w, d))))
+            update(building.withFloors(listOf(newFloor(0, w, d))))
             editor = makeEditor(0)
         }
     }
@@ -112,7 +112,7 @@ class InteriorController(
     fun addFloor() {
         if (!canAddFloor) return
         val below = building.floors.last()
-        update(building.copy(floors = building.floors + newFloor(floorCount, below.plotWidth, below.plotDepth)))
+        update(building.withFloors(building.floors + newFloor(floorCount, below.plotWidth, below.plotDepth)))
         selectFloor(floorCount - 1)
     }
 
@@ -121,7 +121,7 @@ class InteriorController(
         if (!canRemoveFloor) return
         val top = floorCount - 1
         if (floorIndex == top) selectFloor(top - 1)
-        update(building.copy(floors = building.floors.dropLast(1)))
+        update(building.withFloors(building.floors.dropLast(1)))
     }
 
     private fun catalog() = Catalog(building.importedFurniture.map { it.item } + BuiltinCatalog.items)
@@ -134,7 +134,7 @@ class InteriorController(
 
     private fun saveFloor(i: Int, level: Level) {
         if (i !in building.floors.indices) return
-        update(building.copy(floors = building.floors.toMutableList().also { it[i] = level }))
+        update(building.withFloors(building.floors.toMutableList().also { it[i] = level }))
     }
 
     private fun update(b: Building) {

@@ -31,7 +31,7 @@ object DemoContent {
         val home = Building(DEMO_HOME_ID, LOCAL_USER, "Demo cottage", at(0.0, 0.0), placeholderKind = SampleBuildings.Kind.COTTAGE,
             transform = ModelTransform(rotationDeg = 15f))
         return listOf(
-            home.copy(floors = furnishedCottage(home)),
+            home.withFloors(furnishedCottage(home)),
             Building("demo_mosque", LOCAL_USER, "Neighbourhood mosque", at(-38.0, 18.0), placeholderKind = SampleBuildings.Kind.MOSQUE),
             Building("demo_cafe", LOCAL_USER, "Corner café", at(30.0, -14.0), placeholderKind = SampleBuildings.Kind.CAFE,
                 transform = ModelTransform(rotationDeg = -30f)),

@@ -119,9 +119,9 @@ class InteriorTest {
             .placeFurniture(FurnitureItem("t", "table", g(4, 4)), catalog).setStatus("t", Status.EATING)
         val asset = ModelAsset("a1", "local", "chair.glb", 1234, 100, Vec3(0f, 0f, 0f), Vec3(1f, 1f, 1f), "assets/a1.glb")
         val b = DemoContent.buildings().first().copy(
-            floors = listOf(f, InteriorController.newFloor(1, 10, 8)),
             importedFurniture = listOf(ImportedFurniture(CatalogItem("asset:a1", "chair", "Imported", 2, 2, 0.9f, assetId = "a1"), asset)),
-        )
+        ).withFloors(listOf(f, InteriorController.newFloor(1, 10, 8)))
+        assertEquals(f, b.floors[0], "level to scene and back loses nothing")
         val text = WorldJson.json.encodeToString(Building.serializer(), b)
         assertEquals(b, WorldJson.json.decodeFromString(Building.serializer(), text))
     }

@@ -36,7 +36,7 @@ import kotlin.math.abs
 private val BACKDROP = Brush.verticalGradient(listOf(Color(0xFFDCEBFA), Color(0xFFF3E9F6), Color(0xFFFCF5EA)))
 
 /**
- * Lets the interior editor take over the iso view: its own scene (floors, walls, furniture, grid),
+ * Lets the interior or plot editor take over the iso view: its own scene (floors, walls, furniture, grid),
  * its own camera (the editor picks with the same numbers) and all gestures.
  */
 class IsoExtras(
@@ -63,14 +63,15 @@ fun WorldScene(world: WorldController, view: MapView, entities: List<ScreenEntit
 
     if (t > 0f) Box(Modifier.fillMaxSize().alpha(TransitionLook.backdropAlpha(t)).background(BACKDROP))
 
+    val custom = extras.content != null && extras.config != null && TransitionLook.showIsoScene(t)
     val iso = building != null && model != null && TransitionLook.showIsoScene(t)
     val content: SceneContent
     val config: dev.filamentiso.IsoSceneConfig
-    if (iso && extras.content != null && extras.config != null) {
+    if (custom) {
         content = extras.content
-        config = extras.config
+        config = extras.config.let { it.copy(zoom = it.zoom * TransitionLook.isoZoomFactor(t)) }
     } else if (iso) {
-        val m = IsoStage.buildingMatrix(building!!, model!!)
+        val m = IsoStage.buildingMatrix(building, model)
         val bounds = IsoStage.bounds(m, model.bboxMin, model.bboxMax)
         val shell = SceneModel(key = "iso_building", source = model.source, transform = m)
         content = SceneContent(

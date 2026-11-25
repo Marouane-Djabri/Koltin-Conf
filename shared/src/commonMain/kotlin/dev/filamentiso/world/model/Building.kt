@@ -4,6 +4,12 @@ import dev.filamentiso.Vec3
 import dev.filamentiso.geometry.SampleBuildings
 import dev.filamentiso.model.Level
 import dev.filamentiso.world.geo.LatLng
+import dev.filamentiso.model.BuiltinCatalog
+import dev.filamentiso.model.Catalog
+import dev.filamentiso.world.scene.Scene
+import dev.filamentiso.world.scene.toLevel
+import dev.filamentiso.world.scene.toScene
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -57,7 +63,7 @@ enum class Visibility { PRIVATE, FRIENDS, PUBLIC }
 
 /**
  * A building on the world map: either an imported [asset] or a built-in [placeholderKind].
- * [floors] are the interior levels (edited in the isometric view).
+ * [scenes] are the interior floors, bottom first (edited in the isometric view).
  */
 @Serializable
 data class Building(
@@ -69,11 +75,32 @@ data class Building(
     val placeholderKind: SampleBuildings.Kind? = SampleBuildings.Kind.COTTAGE,
     val transform: ModelTransform = ModelTransform(),
     val visibility: Visibility = Visibility.PRIVATE,
-    val floors: List<Level> = emptyList(),
+    val scenes: List<Scene> = emptyList(),
+    /** Floors as saved before [scenes] existed. Only read; [migrated] moves them into [scenes]. */
+    @SerialName("floors") val legacyFloors: List<Level> = emptyList(),
     /** Furniture the user imported for this building (shown in the catalog next to the built-in pieces). */
     val importedFurniture: List<ImportedFurniture> = emptyList(),
-    val formatVersion: Int = 1,
+    val formatVersion: Int = 2,
 ) {
+    /** The floors in the form the wall / room editor works on. */
+    val floors: List<Level> by lazy { scenes.map { it.toLevel() } }
+
+    /** Replaces the floors, keeping each floor's interaction spots. */
+    fun withFloors(levels: List<Level>): Building {
+        val catalog = Catalog(importedFurniture.map { it.item } + BuiltinCatalog.items)
+        return copy(
+            scenes = levels.mapIndexed { i, l ->
+                l.toScene("$id#$i", ownerId, "$name, floor ${i + 1}", position, transform.rotationDeg, catalog)
+                    .copy(spots = scenes.getOrNull(i)?.spots ?: emptyList())
+            },
+            legacyFloors = emptyList(),
+            formatVersion = 2,
+        )
+    }
+
+    /** Old saves had plain levels: turn them into scenes. */
+    fun migrated(): Building = if (scenes.isEmpty() && legacyFloors.isNotEmpty()) withFloors(legacyFloors) else this
+
     /** What the overlay draws. */
     val modelRef: ModelRef
         get() = asset?.let { ModelRef.Asset(it.id) } ?: ModelRef.Placeholder(placeholderKind ?: SampleBuildings.Kind.COTTAGE)

@@ -1,8 +1,10 @@
 package dev.filamentiso.storage
 
 import dev.filamentiso.world.model.Building
+import dev.filamentiso.world.scene.Scene
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 
 /**
@@ -59,38 +61,67 @@ class BlobAssetStore(private val blobs: BlobStore) : AssetStore {
     override suspend fun delete(storagePath: String) = blobs.delete(storagePath)
 }
 
-class BlobBuildingRepository(private val blobs: BlobStore) : BuildingRepository {
+/** Outdoor plots. Behind an interface so a backend can replace it later. */
+interface PlotRepository {
+    suspend fun list(): List<Scene>
+    suspend fun save(plot: Scene)
+    suspend fun delete(id: String)
+}
+
+class BlobBuildingRepository(blobs: BlobStore) : BuildingRepository {
+    private val docs = JsonDocs(blobs, "buildings/", Building.serializer(), { it.id }, { it.migrated() })
+    override suspend fun list() = docs.list()
+    override suspend fun get(id: String) = docs.get(id)
+    override suspend fun save(building: Building) = docs.save(building)
+    override suspend fun delete(id: String) = docs.delete(id)
+}
+
+class BlobPlotRepository(blobs: BlobStore) : PlotRepository {
+    private val docs = JsonDocs(blobs, "plots/", Scene.serializer(), { it.id })
+    override suspend fun list() = docs.list()
+    override suspend fun save(plot: Scene) = docs.save(plot)
+    override suspend fun delete(id: String) = docs.delete(id)
+}
+
+/** One JSON file per document under [prefix], cached in memory after the first read. */
+private class JsonDocs<T : Any>(
+    private val blobs: BlobStore,
+    private val prefix: String,
+    private val serializer: KSerializer<T>,
+    private val idOf: (T) -> String,
+    private val migrate: (T) -> T = { it },
+) {
     private val mutex = Mutex()
-    private val cache = LinkedHashMap<String, Building>()
+    private val cache = LinkedHashMap<String, T>()
     private var loaded = false
 
     private suspend fun ensureLoaded() {
         if (loaded) return
-        for (key in blobs.keys("buildings/")) {
+        for (key in blobs.keys(prefix)) {
             val text = blobs.get(key)?.decodeToString() ?: continue
             // A file from a newer/broken version should not break the whole app.
-            runCatching { WorldJson.json.decodeFromString(Building.serializer(), text) }.getOrNull()?.let { cache[it.id] = it }
+            runCatching { migrate(WorldJson.json.decodeFromString(serializer, text)) }.getOrNull()?.let { cache[idOf(it)] = it }
         }
         loaded = true
     }
 
-    override suspend fun list(): List<Building> = mutex.withLock { ensureLoaded(); cache.values.toList() }
-    override suspend fun get(id: String): Building? = mutex.withLock { ensureLoaded(); cache[id] }
+    suspend fun list(): List<T> = mutex.withLock { ensureLoaded(); cache.values.toList() }
+    suspend fun get(id: String): T? = mutex.withLock { ensureLoaded(); cache[id] }
 
-    override suspend fun save(building: Building) = mutex.withLock {
+    suspend fun save(doc: T) = mutex.withLock {
         ensureLoaded()
-        blobs.put(key(building.id), WorldJson.json.encodeToString(Building.serializer(), building).encodeToByteArray())
-        cache[building.id] = building
+        blobs.put(key(idOf(doc)), WorldJson.json.encodeToString(serializer, doc).encodeToByteArray())
+        cache[idOf(doc)] = doc
     }
 
-    override suspend fun delete(id: String) = mutex.withLock {
+    suspend fun delete(id: String) = mutex.withLock {
         ensureLoaded()
         blobs.delete(key(id))
         cache.remove(id)
         Unit
     }
 
-    private fun key(id: String) = "buildings/$id.json"
+    private fun key(id: String) = "$prefix$id.json"
 }
 
 object WorldJson {

@@ -8,7 +8,13 @@ import androidx.compose.runtime.setValue
 import dev.filamentiso.geometry.SampleBuildings
 import dev.filamentiso.model.newId
 import dev.filamentiso.storage.AssetStore
+import dev.filamentiso.storage.BlobPlotRepository
 import dev.filamentiso.storage.BuildingRepository
+import dev.filamentiso.storage.InMemoryBlobStore
+import dev.filamentiso.storage.PlotRepository
+import dev.filamentiso.world.scene.Plots
+import dev.filamentiso.world.scene.Scene
+import kotlinx.coroutines.CancellationException
 import dev.filamentiso.world.geo.LatLng
 import dev.filamentiso.world.model.Building
 import dev.filamentiso.world.model.LOCAL_USER
@@ -35,10 +41,13 @@ class WorldController(
     val assets: AssetStore,
     /** Returns true once, on the first launch (then remembers it). Null = never seed. */
     private val firstRun: (suspend () -> Boolean)? = null,
+    private val plotRepository: PlotRepository = BlobPlotRepository(InMemoryBlobStore()),
 ) {
     val models = ModelProvider(assets)
 
     var buildings by mutableStateOf<List<Building>>(emptyList()); private set
+    var plots by mutableStateOf<List<Scene>>(emptyList()); private set
+    /** Id of the selected building or plot. */
     var selectedId by mutableStateOf<String?>(null)
     /** Building being placed / adjusted: drag moves it, sliders scale/rotate it. Saved on "Done". */
     var placing by mutableStateOf<Building?>(null); private set
@@ -47,6 +56,8 @@ class WorldController(
     var modelsVersion by mutableIntStateOf(0); private set
 
     val selected: Building? get() = buildings.firstOrNull { it.id == selectedId }
+
+    val selectedPlot: Scene? get() = plots.firstOrNull { it.id == selectedId }
 
     /** What the overlay drew last frame, for tap hit-testing (not state: it changes every frame). */
     var lastEntities: List<ScreenEntity> = emptyList()
@@ -60,6 +71,7 @@ class WorldController(
         try {
             if (firstRun?.invoke() == true) DemoContent.buildings().forEach { repository.save(it) }
             buildings = repository.list().sortedBy { it.name }
+            plots = plotRepository.list().sortedBy { it.name }
         } catch (e: Exception) {
             message = e.message ?: "Could not read saved buildings."
         }
@@ -80,6 +92,60 @@ class WorldController(
         }
         if (changed) modelsVersion++
     }
+
+    // ---------------------------------------------------------------- plots
+
+    /** Plot being claimed or moved. It follows the map centre until [finishClaim]. */
+    var claiming by mutableStateOf<Scene?>(null); private set
+    val claimingExisting: Boolean get() = claiming?.let { c -> plots.any { it.id == c.id } } == true
+
+    fun startClaim(at: LatLng) { selectedId = null; claiming = Plots.new(at) }
+    fun startMovingPlot(p: Scene) { selectedId = null; claiming = p }
+    fun moveClaim(p: LatLng) { claiming = claiming?.copy(anchor = p) }
+    fun rotateClaim(deg: Float) { claiming = claiming?.let { it.copy(headingDeg = ModelTransform.snapRotation(it.headingDeg + deg)) } }
+
+    /** Only new plots can change size: an existing one has content. */
+    fun setClaimSize(meters: Int) { if (!claimingExisting) claiming = claiming?.copy(width = meters, depth = meters) }
+    fun cancelClaim() { claiming = null }
+
+    suspend fun finishClaim() {
+        val p = claiming ?: return
+        if (!savePlot(p)) return
+        claiming = null
+        selectedId = p.id
+    }
+
+    /** Returns false (with a [message]) if the plot could not be stored. */
+    suspend fun savePlot(p: Scene): Boolean {
+        val isNew = plots.none { it.id == p.id }
+        fun remember() { plots = (plots.filter { it.id != p.id } + p).sortedBy { it.name } }
+        // Edits show at once, even while the write is still running.
+        if (!isNew) remember()
+        return try {
+            plotRepository.save(p)
+            if (isNew) remember()
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            message = e.message ?: "Could not save."
+            false
+        }
+    }
+
+    suspend fun deletePlot(p: Scene) {
+        try {
+            plotRepository.delete(p.id)
+            plots = plots.filter { it.id != p.id }
+            if (selectedId == p.id) selectedId = null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            message = e.message ?: "Could not delete."
+        }
+    }
+
+    // ---------------------------------------------------------------- buildings
 
     fun startNewBuilding(at: LatLng, kind: SampleBuildings.Kind = SampleBuildings.Kind.COTTAGE) {
         selectedId = null
@@ -114,7 +180,8 @@ class WorldController(
 
     suspend fun finishPlacing() {
         val b = placing ?: return
-        save(b)
+        // Floors remember where they are: refresh that after a move.
+        save(if (b.scenes.isEmpty()) b else b.withFloors(b.floors))
         placing = null
         selectedId = b.id
     }
@@ -166,6 +233,15 @@ class WorldController(
     /** The building shown in the iso view (also during both transitions). */
     val isoBuilding: Building? get() = viewMode.buildingIdOrNull?.let { id -> buildings.firstOrNull { it.id == id } }
 
+    /** The plot shown in the iso view. View modes only carry an id, so plots use the same transition. */
+    val isoPlot: Scene? get() = viewMode.buildingIdOrNull?.let { id -> plots.firstOrNull { it.id == id } }
+    val isoAnchor: LatLng? get() = isoBuilding?.position ?: isoPlot?.anchor
+
+    fun open(p: Scene) {
+        selectedId = null
+        viewMode = ViewModeMachine.open(viewMode, p.id)
+    }
+
     fun open(b: Building) {
         if (viewMode == ViewMode.Map) { isoStep = 0; isoZoom = 1f }
         selectedId = null
@@ -176,7 +252,7 @@ class WorldController(
     fun enterInterior() { viewMode = ViewModeMachine.enterInterior(viewMode) }
 
     fun tick(dtMs: Float) {
-        if (viewMode.buildingIdOrNull != null && isoBuilding == null) { viewMode = ViewModeMachine.buildingGone(viewMode); return }
+        if (viewMode.buildingIdOrNull != null && isoAnchor == null) { viewMode = ViewModeMachine.buildingGone(viewMode); return }
         val before = viewMode
         viewMode = ViewModeMachine.tick(viewMode, dtMs)
         // Re-select the building when we land back on the map, so its sheet is still there.
